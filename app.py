@@ -27,10 +27,16 @@ except ImportError:
     BLOOMBERG_AVAILABLE = False
 
 # ── Kaleido para export PNG (opcional) ────────────────────────────────────────
+KALEIDO_AVAILABLE = False
 try:
     import kaleido  # noqa: F401
+    # Verificar que realmente puede renderizar (necesita Chrome en el sistema)
+    import plotly.io as pio
+    _test_fig = go.Figure(data=[go.Scatter(x=[0], y=[0])])
+    _test_fig.to_image(format="png", width=100, height=100)
     KALEIDO_AVAILABLE = True
-except ImportError:
+    del _test_fig
+except Exception:
     KALEIDO_AVAILABLE = False
 
 
