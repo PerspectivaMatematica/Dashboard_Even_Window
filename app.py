@@ -45,14 +45,20 @@ except Exception:
 # ══════════════════════════════════════════════════════════════════════════════
 
 ASSET_TYPES    = ["equity", "rate", "fx", "commodity", "other"]
-FIELD_MODES    = ["cumulative_return", "absolute_change", "pct_change", "price"]
+FIELD_MODES    = ["cumulative_return", "absolute_change", "pct_change", "price_indexed", "price"]
 BASELINE_MODES = ["base100", "base0", "none"]
 FREQUENCIES    = ["daily", "weekly", "monthly", "annual"]
+AGG_METHODS    = ["last", "average"]
 
 FREQ_LABEL = {"daily": "D", "weekly": "W", "monthly": "M", "annual": "Y"}
 
+# Tolerancia maxima (dias) entre fecha objetivo y dato mapeado por frecuencia.
+# Si la distancia es mayor, se considera que no hay dato disponible (NaN).
+MAX_GAP_DAYS = {"daily": 7, "weekly": 14, "monthly": 45, "annual": 400}
+
 FIELD_MODE_LABELS = {
-    "price":             "Precio Raw (nivel)",
+    "price":             "Precio Raw (nivel real)",
+    "price_indexed":     "Precio Indexado (Base 100)",
     "cumulative_return": "Retorno Acumulado (%)",
     "pct_change":        "Cambio Porcentual (%)",
     "absolute_change":   "Cambio Absoluto",
@@ -62,6 +68,11 @@ BASELINE_LABELS = {
     "base100": "Base 100 (indexado al evento)",
     "base0":   "Base 0 (cambio desde el evento)",
     "none":    "Sin normalizar (nivel real)",
+}
+
+AGG_METHOD_LABELS = {
+    "last":    "Ultimo dato disponible",
+    "average": "Promedio del periodo",
 }
 
 ASSET_DEFAULTS = {
@@ -405,12 +416,30 @@ def auto_detect_tickers(data_df: pd.DataFrame) -> list[dict]:
 # CARGA DE DATOS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def load_from_file(uploaded_file):
+def get_excel_sheet_names(uploaded_file) -> list[str]:
+    """Devuelve la lista de hojas de un Excel. Lista vacia si es CSV."""
+    name = uploaded_file.name.lower()
+    if not name.endswith((".xlsx", ".xls")):
+        return []
+    try:
+        uploaded_file.seek(0)
+        xls = pd.ExcelFile(uploaded_file)
+        sheets = xls.sheet_names
+        uploaded_file.seek(0)
+        return sheets
+    except Exception:
+        uploaded_file.seek(0)
+        return []
+
+
+def load_from_file(uploaded_file, sheet_name=None):
     """Carga datos de precios desde CSV o Excel subido por el usuario."""
     try:
         name = uploaded_file.name.lower()
         if name.endswith((".xlsx", ".xls")):
-            df = pd.read_excel(uploaded_file, index_col=0, parse_dates=True)
+            uploaded_file.seek(0)
+            df = pd.read_excel(uploaded_file, index_col=0, parse_dates=True,
+                               sheet_name=sheet_name or 0)
         else:
             content = uploaded_file.read()
             uploaded_file.seek(0)
@@ -504,6 +533,7 @@ def load_from_bloomberg(fields_map: dict, start_date, end_date):
 # ══════════════════════════════════════════════════════════════════════════════
 
 def build_target_dates(event_date, lookback, lookforward, frequency):
+    """Genera lista de (periodo_relativo, fecha_objetivo)."""
     event_ts = pd.Timestamp(event_date)
     result = []
     for offset in range(-lookback, lookforward + 1):
@@ -521,17 +551,66 @@ def build_target_dates(event_date, lookback, lookforward, frequency):
     return result
 
 
-def get_prior_observation(target_ts, series_index):
+def get_prior_observation(target_ts, series_index, max_gap_days=None):
+    """
+    Devuelve la fecha mas cercana anterior a target_ts.
+    Si max_gap_days se proporciona y la distancia entre target_ts y la fecha
+    mapeada supera ese umbral, devuelve None (= sin dato, no repite).
+    """
     prior = series_index[series_index <= target_ts]
-    return prior[-1] if len(prior) > 0 else None
+    if len(prior) == 0:
+        return None
+    mapped = prior[-1]
+    if max_gap_days is not None:
+        gap = (target_ts - mapped).days
+        if gap > max_gap_days:
+            return None
+    return mapped
 
 
-def extract_aligned_values(series, event_date, lookback, lookforward, frequency):
+def get_period_average(series, period_start, period_end):
+    """Calcula el promedio de la serie entre period_start y period_end (inclusive)."""
+    mask = (series.index >= period_start) & (series.index <= period_end)
+    subset = series[mask]
+    if len(subset) == 0:
+        return np.nan
+    return subset.mean()
+
+
+def extract_aligned_values(series, event_date, lookback, lookforward, frequency,
+                           agg_method="last"):
+    """
+    Extrae valores alineados para un evento.
+    agg_method:
+      - "last"    : ultimo dato disponible antes de la fecha objetivo (default)
+      - "average" : promedio de todas las observaciones dentro del periodo
+    """
     target_dates = build_target_dates(event_date, lookback, lookforward, frequency)
+    max_gap = MAX_GAP_DAYS.get(frequency, 7)
     result = {}
-    for period, target_ts in target_dates:
-        mapped = get_prior_observation(target_ts, series.index)
-        result[period] = series.loc[mapped] if mapped is not None else np.nan
+
+    if agg_method == "average" and frequency != "daily":
+        # Para promedio: calcular la media entre dos fechas objetivo consecutivas
+        for i, (period, target_ts) in enumerate(target_dates):
+            if i == 0:
+                # Primer periodo: desde (target - 1 periodo) hasta target
+                prev_ts = target_ts - pd.Timedelta(days=max_gap)
+            else:
+                prev_ts = target_dates[i - 1][1]
+            avg_val = get_period_average(series, prev_ts + pd.Timedelta(days=1), target_ts)
+            # Si no hay datos en el rango y estamos fuera de la serie, NaN
+            if pd.isna(avg_val):
+                # Intentar con prior observation como fallback
+                mapped = get_prior_observation(target_ts, series.index, max_gap)
+                result[period] = series.loc[mapped] if mapped is not None else np.nan
+            else:
+                result[period] = avg_val
+    else:
+        # Metodo default: ultimo dato disponible
+        for period, target_ts in target_dates:
+            mapped = get_prior_observation(target_ts, series.index, max_gap)
+            result[period] = series.loc[mapped] if mapped is not None else np.nan
+
     return result
 
 
@@ -542,9 +621,8 @@ def extract_aligned_values(series, event_date, lookback, lookforward, frequency)
 def apply_transformation(raw_dict: dict, field_mode: str, baseline_mode: str) -> dict:
     """
     Transforma valores alineados.
-    - price + none  => nivel real (sin tocar)
-    - price + base100 => indexado 100
-    - price + base0 => cambio absoluto
+    - price          => nivel real (sin tocar, sin normalizar)
+    - price_indexed  => siempre base 100 en T=0
     - cumulative_return / pct_change => (v/anchor - 1)*100
     - absolute_change => v - anchor
     """
@@ -567,13 +645,15 @@ def apply_transformation(raw_dict: dict, field_mode: str, baseline_mode: str) ->
         elif field_mode == "absolute_change":
             out[p] = v - anchor
 
+        elif field_mode == "price_indexed":
+            # Siempre indexa a 100 en T=0
+            out[p] = (v / anchor * 100) if anchor != 0 else np.nan
+
         elif field_mode == "price":
-            # *** CORREGIDO: "none" devuelve el nivel real ***
-            if baseline_mode == "base100":
-                out[p] = (v / anchor * 100) if anchor != 0 else np.nan
-            elif baseline_mode == "base0":
+            # Nivel real, sin ninguna normalizacion
+            if baseline_mode == "base0":
                 out[p] = v - anchor
-            else:  # none → valor raw tal cual
+            else:
                 out[p] = v
         else:
             out[p] = v
@@ -656,7 +736,7 @@ def create_event_chart(
     # ── Linea horizontal de referencia ────────────────────────────────────────
     if field_mode in ("cumulative_return", "pct_change", "absolute_change"):
         fig.add_hline(y=0, line_color="rgba(150,150,150,0.35)", line_width=1)
-    elif field_mode == "price" and baseline_mode == "base100":
+    elif field_mode == "price_indexed":
         fig.add_hline(y=100, line_color="rgba(150,150,150,0.35)", line_width=1)
 
     # ── Ticks ─────────────────────────────────────────────────────────────────
@@ -784,8 +864,23 @@ def main():
         if not use_bloomberg:
             st.caption("Sube tu archivo de precios historicos.")
             uploaded = st.file_uploader("", type=["csv","xlsx","xls"], label_visibility="collapsed")
+            selected_sheet = None
             if uploaded:
-                data_df, err = load_from_file(uploaded)
+                # Detectar hojas del Excel
+                sheets = get_excel_sheet_names(uploaded)
+                if len(sheets) > 1:
+                    selected_sheet = st.selectbox(
+                        "Hoja del Excel:", sheets,
+                        index=0, key="sheet_selector",
+                    )
+                elif len(sheets) == 1:
+                    selected_sheet = sheets[0]
+
+                # Construir clave unica (archivo + hoja) para auto-deteccion
+                sheet_tag = selected_sheet or "0"
+                file_key = f"{uploaded.name}_{uploaded.size}_{sheet_tag}"
+
+                data_df, err = load_from_file(uploaded, sheet_name=selected_sheet)
                 if err:
                     st.error(f"Error: {err}")
                 else:
@@ -795,8 +890,7 @@ def main():
                         f'{data_df.index[0].date()} → {data_df.index[-1].date()}</div>',
                         unsafe_allow_html=True,
                     )
-                    # *** AUTO-DETECTAR tickers al subir archivo nuevo ***
-                    file_key = uploaded.name + str(uploaded.size)
+                    # *** AUTO-DETECTAR tickers al subir archivo / cambiar hoja ***
                     if st.session_state.last_file_key != file_key:
                         st.session_state.last_file_key = file_key
                         st.session_state.tickers = auto_detect_tickers(data_df)
@@ -859,6 +953,19 @@ def main():
             lookback    = st.number_input("Lookback", min_value=1, max_value=500, value=30)
         with c2:
             lookforward = st.number_input("Lookforward", min_value=1, max_value=500, value=30)
+
+        # Metodo de agregacion (relevante cuando freq > frecuencia de datos)
+        if frequency != "daily":
+            agg_method = st.selectbox(
+                "Metodo de agregacion",
+                AGG_METHODS,
+                format_func=lambda x: AGG_METHOD_LABELS.get(x, x),
+                help="Si tus datos son diarios y la frecuencia es mensual/semanal:\n"
+                     "- Ultimo dato: toma el precio mas reciente del periodo\n"
+                     "- Promedio: calcula el promedio de todas las observaciones del periodo",
+            )
+        else:
+            agg_method = "last"
 
         st.divider()
 
@@ -1104,7 +1211,10 @@ def main():
         for ev in valid_events:
             ev_label = ev["label"]
             try:
-                raw = extract_aligned_values(series, ev["date"], lookback, lookforward, frequency)
+                raw = extract_aligned_values(
+                    series, ev["date"], lookback, lookforward, frequency,
+                    agg_method=agg_method,
+                )
                 if pd.isna(raw.get(0, np.nan)):
                     skipped.append(ev_label)
                     continue
