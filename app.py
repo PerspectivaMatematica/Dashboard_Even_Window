@@ -52,10 +52,6 @@ AGG_METHODS    = ["last", "average"]
 
 FREQ_LABEL = {"daily": "D", "weekly": "W", "monthly": "M", "annual": "Y"}
 
-# Tolerancia maxima (dias) entre fecha objetivo y dato mapeado por frecuencia.
-# Si la distancia es mayor, se considera que no hay dato disponible (NaN).
-MAX_GAP_DAYS = {"daily": 7, "weekly": 14, "monthly": 45, "annual": 400}
-
 FIELD_MODE_LABELS = {
     "price":             "Precio Raw (nivel real)",
     "price_indexed":     "Precio Indexado (Base 100)",
@@ -551,21 +547,26 @@ def build_target_dates(event_date, lookback, lookforward, frequency):
     return result
 
 
-def get_prior_observation(target_ts, series_index, max_gap_days=None):
+def get_prior_observation(target_ts, series_index):
     """
     Devuelve la fecha mas cercana anterior a target_ts.
-    Si max_gap_days se proporciona y la distancia entre target_ts y la fecha
-    mapeada supera ese umbral, devuelve None (= sin dato, no repite).
+    Si target_ts esta fuera del rango de la serie (antes del primer dato
+    o despues del ultimo dato), devuelve None → NaN, sin repetir valores.
     """
+    if len(series_index) == 0:
+        return None
+    # Si la fecha objetivo es posterior al ultimo dato, NO hay observacion
+    if target_ts > series_index[-1]:
+        return None
+    # Si la fecha objetivo es anterior al primer dato, NO hay observacion
+    if target_ts < series_index[0]:
+        return None
+    # Dentro del rango: buscar la observacion previa mas cercana
+    # (maneja fines de semana, feriados, gaps normales)
     prior = series_index[series_index <= target_ts]
     if len(prior) == 0:
         return None
-    mapped = prior[-1]
-    if max_gap_days is not None:
-        gap = (target_ts - mapped).days
-        if gap > max_gap_days:
-            return None
-    return mapped
+    return prior[-1]
 
 
 def get_period_average(series, period_start, period_end):
@@ -586,29 +587,25 @@ def extract_aligned_values(series, event_date, lookback, lookforward, frequency,
       - "average" : promedio de todas las observaciones dentro del periodo
     """
     target_dates = build_target_dates(event_date, lookback, lookforward, frequency)
-    max_gap = MAX_GAP_DAYS.get(frequency, 7)
     result = {}
 
     if agg_method == "average" and frequency != "daily":
         # Para promedio: calcular la media entre dos fechas objetivo consecutivas
         for i, (period, target_ts) in enumerate(target_dates):
             if i == 0:
-                # Primer periodo: desde (target - 1 periodo) hasta target
-                prev_ts = target_ts - pd.Timedelta(days=max_gap)
+                prev_ts = target_dates[0][1] - pd.Timedelta(days=1)
             else:
                 prev_ts = target_dates[i - 1][1]
             avg_val = get_period_average(series, prev_ts + pd.Timedelta(days=1), target_ts)
-            # Si no hay datos en el rango y estamos fuera de la serie, NaN
             if pd.isna(avg_val):
-                # Intentar con prior observation como fallback
-                mapped = get_prior_observation(target_ts, series.index, max_gap)
+                mapped = get_prior_observation(target_ts, series.index)
                 result[period] = series.loc[mapped] if mapped is not None else np.nan
             else:
                 result[period] = avg_val
     else:
         # Metodo default: ultimo dato disponible
         for period, target_ts in target_dates:
-            mapped = get_prior_observation(target_ts, series.index, max_gap)
+            mapped = get_prior_observation(target_ts, series.index)
             result[period] = series.loc[mapped] if mapped is not None else np.nan
 
     return result
@@ -866,15 +863,14 @@ def main():
             uploaded = st.file_uploader("", type=["csv","xlsx","xls"], label_visibility="collapsed")
             selected_sheet = None
             if uploaded:
-                # Detectar hojas del Excel
+                # Detectar hojas del Excel (vacio si es CSV)
                 sheets = get_excel_sheet_names(uploaded)
-                if len(sheets) > 1:
+                if len(sheets) >= 1:
                     selected_sheet = st.selectbox(
-                        "Hoja del Excel:", sheets,
+                        f"📄 Hoja del Excel ({len(sheets)} disponible{'s' if len(sheets)>1 else ''}):",
+                        sheets,
                         index=0, key="sheet_selector",
                     )
-                elif len(sheets) == 1:
-                    selected_sheet = sheets[0]
 
                 # Construir clave unica (archivo + hoja) para auto-deteccion
                 sheet_tag = selected_sheet or "0"
