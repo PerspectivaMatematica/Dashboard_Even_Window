@@ -925,15 +925,11 @@ def main():
             st.session_state.events.pop(remove_ev)
             st.rerun()
 
-        col_add, col_ref = st.columns(2)
-        with col_add:
-            if st.button("➕ Agregar", use_container_width=True):
-                n = len(st.session_state.events) + 1
-                st.session_state.events.append({"label": f"Evento {n}", "date": "2024-01-01"})
-                st.rerun()
-        with col_ref:
-            if st.button("📋 Catalogo", use_container_width=True, help="Ver eventos de referencia"):
-                st.session_state.show_event_catalog = True
+        if st.button("➕ Agregar evento manual", use_container_width=True):
+            n = len(st.session_state.events) + 1
+            st.session_state.events.append({"label": f"Evento {n}", "date": "2024-01-01"})
+            st.rerun()
+        st.caption("💡 Usa el catalogo de eventos en el area principal para agregar desde la lista de referencia.")
 
         st.divider()
 
@@ -1036,33 +1032,37 @@ def main():
     # CONTENIDO PRINCIPAL
     # ══════════════════════════════════════════════════════════════════════════
 
-    # ── Catalogo de eventos (popup) ───────────────────────────────────────────
-    if st.session_state.get("show_event_catalog", False):
-        st.session_state.show_event_catalog = False
-        st.markdown("### 📋 Catalogo de Eventos de Referencia")
-        st.caption("Selecciona los eventos que quieras agregar a tu analisis.")
+    # ── Catalogo de eventos de referencia ─────────────────────────────────────
+    with st.expander("📋 Catalogo de Eventos de Referencia", expanded=False):
+        st.caption("Selecciona eventos y presiona el boton para agregarlos a tu analisis.")
         ev_df = pd.DataFrame(REFERENCE_EVENTS)
         ev_df.index = range(1, len(ev_df) + 1)
         ev_df.columns = ["Evento", "Fecha"]
-        st.dataframe(ev_df, use_container_width=True)
+        st.dataframe(ev_df, use_container_width=True, height=300)
 
         selected = st.multiselect(
-            "Selecciona eventos para agregar:",
+            "Eventos a agregar:",
             options=[f"{e['label']} ({e['date']})" for e in REFERENCE_EVENTS],
+            key="ref_event_selector",
         )
-        if selected and st.button("✅ Agregar seleccionados"):
-            for sel in selected:
-                for ref_ev in REFERENCE_EVENTS:
-                    tag = f"{ref_ev['label']} ({ref_ev['date']})"
-                    if tag == sel:
-                        # No duplicar
-                        existing = [e["date"] for e in st.session_state.events]
-                        if ref_ev["date"] not in existing:
-                            st.session_state.events.append(
-                                {"label": ref_ev["label"], "date": ref_ev["date"]}
-                            )
-            st.rerun()
-        st.divider()
+        if selected:
+            if st.button("✅ Agregar seleccionados", use_container_width=True):
+                added = 0
+                existing_dates = {e["date"] for e in st.session_state.events}
+                for sel in selected:
+                    for ref_ev in REFERENCE_EVENTS:
+                        if f"{ref_ev['label']} ({ref_ev['date']})" == sel:
+                            if ref_ev["date"] not in existing_dates:
+                                st.session_state.events.append(
+                                    {"label": ref_ev["label"], "date": ref_ev["date"]}
+                                )
+                                existing_dates.add(ref_ev["date"])
+                                added += 1
+                if added > 0:
+                    st.success(f"✅ {added} evento{'s' if added > 1 else ''} agregado{'s' if added > 1 else ''}")
+                    st.rerun()
+                else:
+                    st.info("Esos eventos ya estan en tu lista.")
 
     # ── Catalogo de tickers Bloomberg ─────────────────────────────────────────
     with st.expander("📚 Catalogo de Tickers Bloomberg (referencia)"):
