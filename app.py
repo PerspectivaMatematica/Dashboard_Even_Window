@@ -79,12 +79,38 @@ ASSET_DEFAULTS = {
     "other":     {"field_mode": "price",             "baseline_mode": "none"},
 }
 
+# Paleta corporativa (basada en colors_afore)
+PALETTE = {
+    "rojo":               "#FF1B44",
+    "azul":               "#003746",
+    "azul_digital":       "#009CC6",
+    "azul_digital_oscuro":"#001E22",
+    "azul_digital_claro": "#005162",
+    "granate":            "#601636",
+    "granate_claro":      "#B77493",
+    "violeta_oscuro":     "#B18DFB",
+    "naranja_oscuro":     "#FF5F00",
+    "naranja":            "#FA8D5A",
+    "verde_oscuro":       "#00AD59",
+    "verde":              "#2DDC8E",
+    "azul_grisaceo":      "#A0D6E2",
+    "crema":              "#FDE8E0",
+}
+
+# Colores para lineas de eventos (orden pensado para buen contraste)
 EVENT_COLORS = [
-    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
-    "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
-    "#aec7e8", "#ffbb78", "#98df8a", "#ff9896", "#c5b0d5",
-    "#ff6b6b", "#4ecdc4", "#45b7d1", "#96ceb4", "#ffeaa7",
-    "#636efa", "#ef553b", "#00cc96", "#ab63fa", "#ffa15a",
+    "#003746",   # Azul
+    "#FF1B44",   # Rojo
+    "#00AD59",   # Verde Oscuro
+    "#FF5F00",   # Naranja Oscuro
+    "#B18DFB",   # Violeta Oscuro
+    "#009CC6",   # Azul Digital
+    "#601636",   # Granate
+    "#FA8D5A",   # Naranja
+    "#2DDC8E",   # Verde
+    "#B77493",   # Granate Claro
+    "#005162",   # Azul Digital Claro
+    "#A0D6E2",   # Azul Grisaceo
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -671,7 +697,8 @@ def build_period_labels(periods, freq):
 
 def create_event_chart(
     ticker_id, display_name, events, aligned_data,
-    field_mode, baseline_mode, frequency, show_avg=True
+    field_mode, baseline_mode, frequency,
+    show_avg=True, highlight_event=None
 ):
     """Crea figura Plotly para un ticker con una linea por evento + promedio."""
     fig = go.Figure()
@@ -680,6 +707,8 @@ def create_event_chart(
     all_periods = sorted({p for ev_data in aligned_data.values() for p in ev_data})
     period_labels = build_period_labels(all_periods, frequency)
     label_map = dict(zip(all_periods, period_labels))
+
+    has_highlight = highlight_event is not None
 
     # ── Lineas por evento ─────────────────────────────────────────────────────
     for i, ev in enumerate(events):
@@ -690,6 +719,22 @@ def create_event_chart(
             continue
         ev_data = aligned_data[ev_label]
         y_vals  = [ev_data.get(p, np.nan) for p in all_periods]
+
+        # Determinar estilo segun highlight
+        is_highlighted = (ev_label == highlight_event)
+        if has_highlight and is_highlighted:
+            line_w   = 4.5
+            marker_s = 7
+            opacity  = 1.0
+            color    = PALETTE["rojo"]  # El destacado siempre en rojo
+        elif has_highlight and not is_highlighted:
+            line_w   = 1.5
+            marker_s = 3
+            opacity  = 0.30
+        else:
+            line_w   = 2.5
+            marker_s = 5
+            opacity  = 1.0
 
         hover = []
         for j, p in enumerate(all_periods):
@@ -702,8 +747,9 @@ def create_event_chart(
         fig.add_trace(go.Scatter(
             x=all_periods, y=y_vals, mode="lines+markers",
             name=f"{ev_label} ({ev_date})",
-            line=dict(color=color, width=2.5),
-            marker=dict(size=5, color=color),
+            line=dict(color=color, width=line_w),
+            marker=dict(size=marker_s, color=color),
+            opacity=opacity,
             hovertext=hover, hoverinfo="text", connectgaps=False,
         ))
 
@@ -715,43 +761,47 @@ def create_event_chart(
             clean = [v for v in vals if not pd.isna(v)]
             mean_y.append(np.mean(clean) if clean else np.nan)
 
+        avg_opacity = 0.35 if has_highlight else 0.65
         fig.add_trace(go.Scatter(
             x=all_periods, y=mean_y, mode="lines",
             name="Promedio",
-            line=dict(color="black", width=3.5, dash="dot"),
-            opacity=0.65,
+            line=dict(color=PALETTE["azul"], width=3, dash="dot"),
+            opacity=avg_opacity,
             hovertemplate="<b>Promedio</b><br>Periodo: %{x}<br>Valor: %{y:.4f}<extra></extra>",
         ))
 
     # ── Linea vertical T=0 ───────────────────────────────────────────────────
     fig.add_vline(
-        x=0, line_dash="dash", line_color="rgba(80,80,80,0.55)", line_width=1.8,
+        x=0, line_dash="dash",
+        line_color="rgba(0,55,70,0.45)", line_width=1.8,  # azul corporativo
         annotation_text="  T=0", annotation_position="top",
-        annotation_font=dict(size=11, color="#666"),
+        annotation_font=dict(size=11, color=PALETTE["azul"]),
     )
 
     # ── Linea horizontal de referencia ────────────────────────────────────────
     if field_mode in ("cumulative_return", "pct_change", "absolute_change"):
-        fig.add_hline(y=0, line_color="rgba(150,150,150,0.35)", line_width=1)
+        fig.add_hline(y=0, line_color="rgba(0,55,70,0.25)", line_width=1)
     elif field_mode == "price_indexed":
-        fig.add_hline(y=100, line_color="rgba(150,150,150,0.35)", line_width=1)
+        fig.add_hline(y=100, line_color="rgba(0,55,70,0.25)", line_width=1)
 
     # ── Ticks ─────────────────────────────────────────────────────────────────
     step = max(1, len(all_periods) // 14)
-    tick_vals = [p for i, p in enumerate(all_periods) if i % step == 0 or p == 0]
+    tick_vals = [p for i_p, p in enumerate(all_periods) if i_p % step == 0 or p == 0]
     tick_text = [label_map[p] for p in tick_vals]
 
     fig.update_layout(
         title=dict(text=f"<b>{display_name or ticker_id}</b>",
-                   font=dict(size=15, color="#0d1b2a"), x=0),
+                   font=dict(size=15, color=PALETTE["azul"]), x=0),
         xaxis=dict(title="Periodo relativo al evento",
                    tickvals=tick_vals, ticktext=tick_text,
-                   gridcolor="#ebebeb", zeroline=False, tickfont=dict(size=11)),
-        yaxis=dict(title=y_title, gridcolor="#ebebeb", tickfont=dict(size=11)),
+                   gridcolor="#ebebeb", zeroline=False,
+                   tickfont=dict(size=11, color="#555")),
+        yaxis=dict(title=y_title, gridcolor="#ebebeb",
+                   tickfont=dict(size=11, color="#555")),
         plot_bgcolor="white", paper_bgcolor="white", hovermode="closest",
         legend=dict(orientation="h", yanchor="bottom", y=-0.42,
                     xanchor="center", x=0.5, font=dict(size=11),
-                    bordercolor="#ddd", borderwidth=1),
+                    bordercolor=PALETTE["azul_grisaceo"], borderwidth=1),
         height=490, margin=dict(l=70, r=30, t=55, b=140),
     )
     return fig
@@ -815,22 +865,37 @@ def main():
     )
     st.markdown("""
     <style>
-    .main-hdr{font-size:1.9rem;font-weight:700;color:#0d1b2a;line-height:1.2}
-    .sub-hdr{color:#555;font-size:.92rem;margin-top:4px;margin-bottom:1.4rem}
+    /* ── Paleta corporativa ── */
+    .main-hdr{font-size:1.9rem;font-weight:700;color:#003746;line-height:1.2}
+    .sub-hdr{color:#005162;font-size:.92rem;margin-top:4px;margin-bottom:1.2rem}
     .sec-title{font-size:.78rem;font-weight:600;text-transform:uppercase;
-               letter-spacing:.06em;color:#888;margin-bottom:6px;margin-top:2px}
-    .status-ok{background:#e8f5e9;border-left:3px solid #43a047;padding:7px 11px;
-               border-radius:4px;color:#1b5e20;font-size:.84rem;margin-bottom:6px}
-    .status-warn{background:#fffde7;border-left:3px solid #fbc02d;padding:7px 11px;
-                 border-radius:4px;color:#6d4c00;font-size:.84rem;margin-bottom:6px}
-    div[data-testid="stExpander"]{border:1px solid #e8e8e8;border-radius:6px}
+               letter-spacing:.06em;color:#003746;margin-bottom:6px;margin-top:2px}
+    .status-ok{background:#f0f9f4;border-left:3px solid #00AD59;padding:7px 11px;
+               border-radius:4px;color:#003746;font-size:.84rem;margin-bottom:6px}
+    .status-warn{background:#fff8f0;border-left:3px solid #FF5F00;padding:7px 11px;
+                 border-radius:4px;color:#601636;font-size:.84rem;margin-bottom:6px}
+    div[data-testid="stExpander"]{border:1px solid #A0D6E2;border-radius:6px}
+
+    /* Linea decorativa bajo el titulo */
+    .title-line{height:3px;border:none;margin:0 0 1.2rem 0;
+                background:linear-gradient(90deg,#FF1B44 0%,#003746 40%,#009CC6 100%);
+                border-radius:2px}
+
+    /* Sidebar header styling */
+    section[data-testid="stSidebar"] .stMarkdown h3{color:#003746}
+    section[data-testid="stSidebar"] .stDivider{border-color:#A0D6E2}
+
+    /* Primary button con azul */
+    .stButton>button[kind="primary"]{background-color:#003746;border-color:#003746}
+    .stButton>button[kind="primary"]:hover{background-color:#005162;border-color:#005162}
     </style>
     """, unsafe_allow_html=True)
 
-    st.markdown('<div class="main-hdr">📊 Event Study Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<div class="main-hdr">Event Study Dashboard</div>', unsafe_allow_html=True)
+    st.markdown('<hr class="title-line">', unsafe_allow_html=True)
     st.markdown(
         '<div class="sub-hdr">Compara el comportamiento historico de activos financieros '
-        'alrededor de fechas de eventos clave — Bloomberg y CSV/Excel.</div>',
+        'alrededor de fechas de eventos clave.</div>',
         unsafe_allow_html=True,
     )
 
@@ -1024,6 +1089,18 @@ def main():
         # ── Opciones de grafica ───────────────────────────────────────────────
         st.markdown('<div class="sec-title">Opciones de grafica</div>', unsafe_allow_html=True)
         show_avg = st.checkbox("Mostrar linea promedio", value=True)
+
+        # Destacar un evento
+        event_labels = [ev["label"] for ev in st.session_state.events]
+        highlight_options = ["Ninguno"] + event_labels
+        highlight_event = st.selectbox(
+            "Destacar evento:",
+            highlight_options,
+            index=0,
+            help="El evento seleccionado se muestra con linea gruesa y el resto se atenua.",
+        )
+        if highlight_event == "Ninguno":
+            highlight_event = None
 
         st.divider()
         run = st.button("🚀 Ejecutar analisis", type="primary", use_container_width=True)
@@ -1227,7 +1304,8 @@ def main():
         # ── Grafica ───────────────────────────────────────────────────────────
         fig = create_event_chart(
             ticker_id, display_name, valid_events,
-            aligned_data, field_mode, baseline_mode, frequency, show_avg=show_avg,
+            aligned_data, field_mode, baseline_mode, frequency,
+            show_avg=show_avg, highlight_event=highlight_event,
         )
         st.plotly_chart(fig, use_container_width=True)
 
