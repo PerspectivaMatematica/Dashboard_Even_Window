@@ -900,12 +900,23 @@ def main():
     )
 
     # ── Init session state ────────────────────────────────────────────────────
+    if "_ev_uid_counter" not in st.session_state:
+        st.session_state._ev_uid_counter = 0
+
+    def _next_ev_uid():
+        st.session_state._ev_uid_counter += 1
+        return st.session_state._ev_uid_counter
+
     if "events" not in st.session_state:
         st.session_state.events = [
-            {"label": "COVID Crash",         "date": "2020-03-16"},
-            {"label": "Russia-Ukraine",      "date": "2022-02-24"},
-            {"label": "SVB Crisis",          "date": "2023-03-10"},
+            {"label": "COVID Crash",         "date": "2020-03-16", "_uid": _next_ev_uid()},
+            {"label": "Russia-Ukraine",      "date": "2022-02-24", "_uid": _next_ev_uid()},
+            {"label": "SVB Crisis",          "date": "2023-03-10", "_uid": _next_ev_uid()},
         ]
+    # Migrar eventos sin _uid (por si vienen de sesion anterior)
+    for ev in st.session_state.events:
+        if "_uid" not in ev:
+            ev["_uid"] = _next_ev_uid()
     if "tickers" not in st.session_state:
         st.session_state.tickers = []  # se auto-pobla al subir archivo
     if "last_file_key" not in st.session_state:
@@ -976,15 +987,16 @@ def main():
 
         remove_ev = None
         for i, ev in enumerate(st.session_state.events):
+            uid = ev["_uid"]
             with st.expander(f"🔴 {ev['label']}", expanded=(i == 0)):
                 c1, c2 = st.columns([3, 2])
                 with c1:
-                    new_label = st.text_input("Nombre", value=ev["label"], key=f"el_{i}")
+                    new_label = st.text_input("Nombre", value=ev["label"], key=f"el_{uid}")
                 with c2:
-                    new_date = st.text_input("Fecha", value=ev["date"], key=f"ed_{i}", help="YYYY-MM-DD")
-                st.session_state.events[i] = {"label": new_label, "date": new_date}
+                    new_date = st.text_input("Fecha", value=ev["date"], key=f"ed_{uid}", help="YYYY-MM-DD")
+                st.session_state.events[i] = {"label": new_label, "date": new_date, "_uid": uid}
                 if len(st.session_state.events) > 1:
-                    if st.button("🗑 Eliminar", key=f"re_{i}", use_container_width=True):
+                    if st.button("🗑 Eliminar", key=f"re_{uid}", use_container_width=True):
                         remove_ev = i
         if remove_ev is not None:
             st.session_state.events.pop(remove_ev)
@@ -992,7 +1004,7 @@ def main():
 
         if st.button("➕ Agregar evento manual", use_container_width=True):
             n = len(st.session_state.events) + 1
-            st.session_state.events.append({"label": f"Evento {n}", "date": "2024-01-01"})
+            st.session_state.events.append({"label": f"Evento {n}", "date": "2024-01-01", "_uid": _next_ev_uid()})
             st.rerun()
         st.caption("💡 Usa el catalogo de eventos en el area principal para agregar desde la lista de referencia.")
 
@@ -1139,7 +1151,7 @@ def main():
                         if f"{ref_ev['label']} ({ref_ev['date']})" == sel:
                             if ref_ev["date"] not in existing_dates:
                                 st.session_state.events.append(
-                                    {"label": ref_ev["label"], "date": ref_ev["date"]}
+                                    {"label": ref_ev["label"], "date": ref_ev["date"], "_uid": _next_ev_uid()}
                                 )
                                 existing_dates.add(ref_ev["date"])
                                 added += 1
