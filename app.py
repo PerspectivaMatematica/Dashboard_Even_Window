@@ -72,10 +72,10 @@ AGG_METHOD_LABELS = {
 }
 
 ASSET_DEFAULTS = {
-    "equity":    {"field_mode": "cumulative_return", "baseline_mode": "base100"},
+    "equity":    {"field_mode": "price_indexed", "baseline_mode": "base100"},
     "rate":      {"field_mode": "absolute_change",   "baseline_mode": "base0"},
-    "fx":        {"field_mode": "cumulative_return", "baseline_mode": "base100"},
-    "commodity": {"field_mode": "cumulative_return", "baseline_mode": "base100"},
+    "fx":        {"field_mode": "price_indexed", "baseline_mode": "base100"},
+    "commodity": {"field_mode": "price_indexed", "baseline_mode": "base100"},
     "other":     {"field_mode": "price",             "baseline_mode": "none"},
 }
 
@@ -996,6 +996,26 @@ def main():
             st.rerun()
         st.caption("💡 Usa el catalogo de eventos en el area principal para agregar desde la lista de referencia.")
 
+        # ── Destacar un evento (justo despues de eventos) ─────────────────────
+        event_labels = [ev["label"] for ev in st.session_state.events]
+        highlight_options = ["Ninguno"] + event_labels
+        # Usar radio dentro de contenedor con scroll para soportar muchos eventos
+        st.markdown(
+            '<p style="font-size:0.85rem;font-weight:600;margin:0.6rem 0 0.2rem;">Destacar evento:</p>',
+            unsafe_allow_html=True,
+        )
+        container_height = min(35 * len(highlight_options) + 20, 220)
+        with st.container(height=container_height):
+            highlight_event = st.radio(
+                "Destacar evento:",
+                highlight_options,
+                index=0,
+                label_visibility="collapsed",
+                help="El evento seleccionado se muestra con linea gruesa y el resto se atenua.",
+            )
+        if highlight_event == "Ninguno":
+            highlight_event = None
+
         st.divider()
 
         # ── Ventana ───────────────────────────────────────────────────────────
@@ -1080,7 +1100,7 @@ def main():
             st.session_state.tickers.append({
                 "ticker": f"TICKER_{n}", "display_name": f"Activo {n}",
                 "csv_column": "", "bloomberg_field": "PX_LAST",
-                "asset_type": "equity", "field_mode": "cumulative_return", "baseline_mode": "base100",
+                "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100",
             })
             st.rerun()
 
@@ -1089,18 +1109,6 @@ def main():
         # ── Opciones de grafica ───────────────────────────────────────────────
         st.markdown('<div class="sec-title">Opciones de grafica</div>', unsafe_allow_html=True)
         show_avg = st.checkbox("Mostrar linea promedio", value=True)
-
-        # Destacar un evento
-        event_labels = [ev["label"] for ev in st.session_state.events]
-        highlight_options = ["Ninguno"] + event_labels
-        highlight_event = st.selectbox(
-            "Destacar evento:",
-            highlight_options,
-            index=0,
-            help="El evento seleccionado se muestra con linea gruesa y el resto se atenua.",
-        )
-        if highlight_event == "Ninguno":
-            highlight_event = None
 
         st.divider()
         run = st.button("🚀 Ejecutar analisis", type="primary", use_container_width=True)
