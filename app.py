@@ -744,7 +744,13 @@ def list_default_data_files() -> list[Path]:
 
 
 def load_default_data_file(path: Path, sheet_name=None):
-    """Carga un archivo (CSV o Excel) desde la carpeta data/ del repo."""
+    """Carga un archivo (CSV o Excel) desde la carpeta data/ del repo.
+
+    Auto-normaliza headers: si las columnas son display_names (ej. "S&P 500"),
+    los convierte a tickers Bloomberg (ej. "SPX Index") usando el mapeo de los
+    presets. Esto permite que el analisis por categoria funcione aunque el
+    archivo se haya guardado con nombres legibles.
+    """
     try:
         name = str(path).lower()
         if name.endswith((".xlsx", ".xls")):
@@ -759,6 +765,20 @@ def load_default_data_file(path: Path, sheet_name=None):
         df = df[df.index.notna()].sort_index()
         df = df[~df.index.duplicated(keep="last")]
         df = df.apply(pd.to_numeric, errors="coerce")
+
+        # ── Normalizacion: display_name → ticker ──
+        # Si el archivo se guardo con nombres legibles (bug previo o intencional),
+        # convertimos las columnas a tickers Bloomberg para que los presets matcheen.
+        try:
+            ticker_to_name = _get_all_preset_names()  # {ticker: display_name}
+            name_to_ticker = {v: k for k, v in ticker_to_name.items()}
+            rename_back = {c: name_to_ticker[c] for c in df.columns
+                           if c in name_to_ticker and name_to_ticker[c] not in df.columns}
+            if rename_back:
+                df = df.rename(columns=rename_back)
+        except Exception:
+            pass  # Si falla la normalizacion, dejamos el df como esta.
+
         return df, None
     except Exception as e:
         return None, str(e)
@@ -778,6 +798,11 @@ def get_local_default_sheets(path: Path) -> list[str]:
 def save_data_to_default_excel(df: pd.DataFrame, target_path: Path = None,
                                 rename_map: dict = None) -> tuple[bool, str]:
     """Guarda el DataFrame de Bloomberg al archivo Excel default del repo.
+
+    IMPORTANTE: por defecto NO renombra columnas — mantiene los tickers
+    Bloomberg (ej. "SPX Index", "GT10 Govt") como headers para que el analisis
+    por categoria pueda hacer lookup por ticker. Solo pasa rename_map si quieres
+    nombres legibles (NO recomendado para el archivo default).
 
     Solo se llama cuando blpapi esta disponible (= corriendo localmente).
     En Streamlit Cloud el filesystem es read-only y esta funcion no se invoca.
@@ -1714,13 +1739,13 @@ def main():
     st.markdown("### ⚡ Analisis rapido por categoria")
     st.caption(
         "Empieza por la **📖 Guía de uso** si es tu primera vez. "
-        "Luego elige una categoría o usa el modo **📂 Manual** para configurar tus propios tickers."
+        "Luego elige una categoría. Para análisis manual con tus propios tickers, "
+        "configúralos en la barra lateral y presiona **🚀 Ejecutar análisis**."
     )
 
     guide_tab_name   = "📖 Guía de uso"
     preset_tab_names = [f"{v['icon']} {k}" for k, v in TAB_PRESETS.items()]
-    manual_tab_name  = "📂 Manual"
-    tab_names = [guide_tab_name] + preset_tab_names + [manual_tab_name]
+    tab_names = [guide_tab_name] + preset_tab_names
     ui_tabs = st.tabs(tab_names)
 
     # ── Tab 0: Guia de uso ────────────────────────────────────────────────────
@@ -1746,13 +1771,15 @@ def main():
 
         st.markdown("### 🅱️  Análisis manual (tickers personalizados)")
         st.markdown(
-            "1. Ve a la pestaña **📂 Manual**.\n"
-            "2. En la barra lateral, agrega los tickers que quieres analizar "
-            "(sección **📈 Tickers** → ➕ Agregar ticker).\n"
-            "3. Configura sus parámetros (tipo de activo, transformación, baseline).\n"
+            "Si quieres analizar tickers que no están en ninguna categoría preset:\n\n"
+            "1. En la barra lateral, sección **📈 Tickers**, presiona **➕ Agregar ticker**.\n"
+            "2. Configura sus parámetros (ticker, tipo de activo, transformación, baseline).\n"
+            "3. Si subiste un CSV/Excel propio, los tickers se auto-detectan; sólo edítalos si necesitas.\n"
             "4. Presiona **🚀 Ejecutar análisis** que está **al final de la barra lateral**.\n\n"
-            "⚠️ **Si presionas \"Ejecutar análisis\" de la barra lateral sin haber agregado tickers, "
-            "no aparecerá nada** — el botón está esperando tus tickers."
+            "⚠️ **Si presionas \"Ejecutar análisis\" de la barra lateral sin tener tickers configurados, "
+            "no aparecerá nada** — el botón está esperando tu lista de tickers. "
+            "Si sólo quieres usar las categorías preset, ignora ese botón y usa los botones "
+            "🚀 Ejecutar de cada pestaña."
         )
 
         st.markdown("### 📅 ¿Cómo agregar eventos?")
@@ -1788,7 +1815,14 @@ def main():
             "categorías (General, Sectores, Tasas, FX, Commodities, Europa & EM).\n"
             "- Con un **CSV/Excel propio**: el PDF se genera en modo *flat* — sólo con los "
             "tickers detectados en tu archivo, en una sola sección.\n\n"
-            "Requiere `pdflatex` instalado en el sistema."
+            "**Dos modos de PDF según el entorno:**\n"
+            "- 🖥️ **Local con LaTeX instalado** → PDF *completo* con portada, índice, "
+            "descripciones por categoría y gráficas. Requiere `pdflatex` (ver instrucciones "
+            "de instalación en el README).\n"
+            "- ☁️ **Streamlit Cloud / sin LaTeX** → PDF *simple*: una gráfica por página, "
+            "sin texto. Funciona sin instalar nada extra (usa matplotlib).\n\n"
+            "La detección es automática — la app intenta usar LaTeX si está disponible y "
+            "cae al modo simple si no."
         )
 
         st.markdown("### 💡 Tips rápidos")
@@ -1849,13 +1883,6 @@ def main():
                     {**dict(tk_p), "csv_column": tk_p["ticker"]}
                     for tk_p in preset_val["tickers"]
                 ]
-
-    # ── Tab Manual ────────────────────────────────────────────────────────────
-    with ui_tabs[-1]:
-        st.info(
-            "Configura tus tickers y eventos en la barra lateral, luego presiona "
-            "**🚀 Ejecutar análisis** al final de la barra lateral."
-        )
 
     # ── Catalogo de tickers Bloomberg ─────────────────────────────────────────
     with st.expander("📚 Catalogo de Tickers Bloomberg (referencia)"):
@@ -2000,12 +2027,13 @@ def main():
             # ── Auto-save local: sobrescribir el Excel default del repo ──
             # Solo cuando blpapi esta disponible (= corriendo en la maquina del usuario,
             # no en Streamlit Cloud que tiene filesystem read-only).
+            # NOTA: NO renombramos columnas — los headers quedan como tickers Bloomberg
+            # (SPX Index, GT10 Govt, etc.) para que el analisis por categoria pueda
+            # hacer lookup por ticker en otros usuarios.
             if BLOOMBERG_AVAILABLE:
-                _names = _get_all_preset_names()
                 _ok, _info = save_data_to_default_excel(
                     master_df,
                     target_path=DEFAULT_DATA_PATH,
-                    rename_map={t: _names.get(t, t) for t in master_df.columns},
                 )
                 if _ok:
                     st.caption(f"💾 Copia guardada en `data/{DEFAULT_DATA_FILENAME}`")
@@ -2051,6 +2079,7 @@ def main():
 
             # ── Auto-save local: agregar/actualizar estos tickers en el Excel default ──
             # Si ya existe el archivo, hacemos merge para no perder otros tickers.
+            # NOTA: NO renombramos columnas — headers quedan como tickers Bloomberg.
             if BLOOMBERG_AVAILABLE:
                 merged_df = data_df.copy()
                 if DEFAULT_DATA_PATH.exists():
@@ -2062,11 +2091,9 @@ def main():
                                 merged_df = pd.concat([merged_df, prev_df[new_cols]], axis=1)
                     except Exception:
                         pass
-                _names = _get_all_preset_names()
                 _ok, _info = save_data_to_default_excel(
                     merged_df,
                     target_path=DEFAULT_DATA_PATH,
-                    rename_map={t: _names.get(t, t) for t in merged_df.columns},
                 )
                 if _ok:
                     st.caption(f"💾 Copia guardada en `data/{DEFAULT_DATA_FILENAME}`")

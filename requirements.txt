@@ -5,6 +5,7 @@ plotly>=5.18.0
 python-dateutil>=2.8.2
 openpyxl>=3.1.0
 kaleido>=0.2.1
+matplotlib>=3.7.0
 
 # Bloomberg (instalación especial — ver README)
 # pip install --index-url=https://bcms.bloomberg.com/pip/simple/ blpapi

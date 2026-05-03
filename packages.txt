@@ -1,0 +1,11 @@
+# packages.txt — paquetes apt que Streamlit Cloud instala antes de arrancar la app.
+#
+# Por default está vacío: la app usa modo PDF simple (matplotlib PdfPages) en
+# Cloud, que no requiere LaTeX. Si querés el PDF completo con LaTeX también
+# en Cloud (build ~10 min más lento la primera vez), descomenta las líneas:
+#
+# texlive-latex-base
+# texlive-latex-recommended
+# texlive-latex-extra
+# texlive-fonts-recommended
+# texlive-lang-spanish

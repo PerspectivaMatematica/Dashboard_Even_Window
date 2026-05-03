@@ -313,6 +313,15 @@ def _create_mpl_chart(ticker_id, display_name, events, aligned_data, field_mode,
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# DETECCION DE pdflatex (LaTeX vs PDF simple)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _has_pdflatex() -> bool:
+    """True si pdflatex esta disponible en el PATH del sistema."""
+    return shutil.which("pdflatex") is not None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # DESCRIPCIONES Y LATEX
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -358,6 +367,115 @@ LATEX_PREAMBLE = r"""
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# BUILD FUNCTION — VARIANTE SIMPLE (sin LaTeX, usa matplotlib PdfPages)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _build_simple_pdf_report(events, data_df, lookback=30, lookforward=30,
+                              frequency="daily", agg_method="last",
+                              output_dir=None, tickers_override=None):
+    """Genera un PDF multi-pagina (una grafica por pagina) usando matplotlib
+    PdfPages. NO requiere pdflatex. Pensado para Streamlit Cloud o ambientes
+    sin LaTeX. Sin portada, sin texto de referencia — solo las graficas.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.backends.backend_pdf import PdfPages
+
+    if output_dir is None:
+        output_dir = Path(__file__).resolve().parent
+    output_dir = Path(output_dir)
+    today_str = date.today().strftime("%Y%m%d")
+
+    # Validar eventos
+    valid_events = []
+    for ev in events:
+        try:
+            pd.Timestamp(ev["date"])
+            valid_events.append(ev)
+        except Exception:
+            pass
+    if not valid_events:
+        print("ERROR: No hay eventos validos.")
+        return None
+
+    # Determinar secciones
+    if tickers_override is not None:
+        sections_iter = [("Tus Series", {"tickers": list(tickers_override)})]
+    else:
+        sections_iter = list(TAB_PRESETS.items())
+
+    # Output path
+    pdf_final = output_dir / "Event_Study_Report_{}.pdf".format(today_str)
+
+    total_charts = 0
+    try:
+        with PdfPages(str(pdf_final)) as pdf:
+            for cat_name, cat_val in sections_iter:
+                for tk in cat_val["tickers"]:
+                    ticker_id = tk["ticker"]
+                    display_name = tk.get("display_name", ticker_id)
+                    field_mode = tk.get("field_mode", "price_indexed")
+                    baseline_mode = tk.get("baseline_mode", "base100")
+
+                    lookup_col = tk.get("csv_column") or ticker_id
+                    if lookup_col not in data_df.columns:
+                        if ticker_id in data_df.columns:
+                            lookup_col = ticker_id
+                        else:
+                            continue
+                    series = data_df[lookup_col].dropna()
+                    if len(series) == 0:
+                        continue
+
+                    aligned_data = {}
+                    for ev in valid_events:
+                        try:
+                            raw = extract_aligned_values(
+                                series, ev["date"], lookback, lookforward,
+                                frequency, agg_method,
+                            )
+                            if any(not pd.isna(v) for v in raw.values()):
+                                aligned_data[ev["label"]] = apply_transformation(
+                                    raw, field_mode, baseline_mode,
+                                )
+                        except Exception:
+                            pass
+
+                    if not aligned_data:
+                        continue
+
+                    fig = _create_mpl_chart(
+                        ticker_id, display_name, valid_events,
+                        aligned_data, field_mode, frequency,
+                    )
+                    pdf.savefig(fig, dpi=150, bbox_inches="tight",
+                                facecolor="white")
+                    plt.close(fig)
+                    total_charts += 1
+
+        if total_charts == 0:
+            print("ERROR: No se genero ninguna grafica.")
+            try:
+                pdf_final.unlink()
+            except Exception:
+                pass
+            return None
+
+        print("PDF (modo simple): {}".format(pdf_final))
+        return pdf_final
+
+    except Exception as e:
+        print("ERROR generando PDF simple: {}".format(e))
+        try:
+            if pdf_final.exists():
+                pdf_final.unlink()
+        except Exception:
+            pass
+        return None
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # BUILD FUNCTION
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -366,6 +484,12 @@ def build_full_report(events, data_df, lookback=30, lookforward=30,
                       tickers_override=None, report_subtitle=None):
     """Genera el PDF completo. Retorna Path al PDF o None.
 
+    Auto-detecta si pdflatex esta disponible:
+    - SI hay pdflatex (corriendo localmente con LaTeX instalado) → genera el
+      PDF "completo" con portada, secciones, descripciones y graficas.
+    - NO hay pdflatex (Streamlit Cloud sin texlive) → cae al modo simple:
+      una grafica por pagina, sin texto, usando matplotlib PdfPages.
+
     Args:
         events: lista de {label, date}
         data_df: DataFrame de precios (index = fechas, columnas = tickers)
@@ -373,8 +497,16 @@ def build_full_report(events, data_df, lookback=30, lookforward=30,
             "Tus Series") en lugar de iterar TAB_PRESETS. Cada elemento debe ser
             {ticker, display_name, field_mode, baseline_mode}. Util para CSVs
             del usuario que no usan tickers Bloomberg.
-        report_subtitle: subtitulo opcional para la portada.
+        report_subtitle: subtitulo opcional para la portada (solo modo LaTeX).
     """
+    # ── Dispatch: si no hay pdflatex, usar el generador simple ──
+    if not _has_pdflatex():
+        print("pdflatex no encontrado → generando PDF en modo simple (matplotlib).")
+        return _build_simple_pdf_report(
+            events, data_df, lookback, lookforward, frequency, agg_method,
+            output_dir, tickers_override,
+        )
+
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
