@@ -17,7 +17,10 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
+from pathlib import Path
+from io import BytesIO
 import io
+import os
 
 # ── Bloomberg (opcional) ──────────────────────────────────────────────────────
 try:
@@ -112,6 +115,167 @@ EVENT_COLORS = [
     "#005162",   # Azul Digital Claro
     "#A0D6E2",   # Azul Grisaceo
 ]
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TABS PRESETS — Configuraciones pre-armadas para analisis rapido via Bloomberg
+# ══════════════════════════════════════════════════════════════════════════════
+
+_EVENTS_GLOBAL = [
+    {"label": "COVID Crash",              "date": "2020-03-16"},
+    {"label": "GFC (Lehman)",             "date": "2008-09-15"},
+    {"label": "9/11 Attacks",             "date": "2001-09-11"},
+    {"label": "Russia-Ukraine",           "date": "2022-02-24"},
+    {"label": "SVB Collapse",             "date": "2023-03-10"},
+    {"label": "Israel-Hamas",             "date": "2023-10-07"},
+    {"label": "Trump Tariffs 2025",       "date": "2025-04-02"},
+]
+
+TAB_PRESETS = {
+    "General": {
+        "icon": "🌎",
+        "description": "Panorama macro: equity, tasas, FX y commodities",
+        "tickers": [
+            # Equity
+            {"ticker": "SPX Index",      "display_name": "S&P 500",       "bloomberg_field": "PX_LAST", "asset_type": "equity",    "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "NDX Index",      "display_name": "Nasdaq 100",    "bloomberg_field": "PX_LAST", "asset_type": "equity",    "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "VIX Index",      "display_name": "VIX",           "bloomberg_field": "PX_LAST", "asset_type": "other",     "field_mode": "price",         "baseline_mode": "none"},
+            {"ticker": "SX5E Index",     "display_name": "Euro Stoxx 50", "bloomberg_field": "PX_LAST", "asset_type": "equity",    "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "MEXBOL Index",   "display_name": "IPC Mexico",    "bloomberg_field": "PX_LAST", "asset_type": "equity",    "field_mode": "price_indexed", "baseline_mode": "base100"},
+            # Tasas nominales
+            {"ticker": "GT2 Govt",        "display_name": "US 2Y",          "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            {"ticker": "GT10 Govt",       "display_name": "US 10Y",         "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            {"ticker": "GTMXN2Y Govt",    "display_name": "MX 2Y",          "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            {"ticker": "GTMXN10Y Govt",   "display_name": "Mbono 10Y",      "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            {"ticker": "GDBR10 Index",    "display_name": "Bund 10Y",       "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            # Tasas reales & breakeven
+            {"ticker": "GTII10 Govt",     "display_name": "US TIPS 10Y",    "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            {"ticker": "USGGBE10 Index",  "display_name": "US BE 10Y",      "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            {"ticker": "GTMXNII10Y Govt", "display_name": "MX Real 10Y",    "bloomberg_field": "PX_LAST", "asset_type": "rate",      "field_mode": "absolute_change","baseline_mode": "base0"},
+            # FX & Commodities
+            {"ticker": "USDMXN Curncy",  "display_name": "USD/MXN",       "bloomberg_field": "PX_LAST", "asset_type": "fx",        "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "DXY Index",      "display_name": "DXY",           "bloomberg_field": "PX_LAST", "asset_type": "fx",        "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "EURUSD Curncy",  "display_name": "EUR/USD",       "bloomberg_field": "PX_LAST", "asset_type": "fx",        "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "XAU Curncy",     "display_name": "Oro",           "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "XAG Curncy",     "display_name": "Plata",         "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "CL1 Comdty",     "display_name": "WTI Crudo",     "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+        ],
+        "events": _EVENTS_GLOBAL,
+    },
+    "Sectores S&P": {
+        "icon": "📊",
+        "description": "11 sectores GICS del S&P 500",
+        "tickers": [
+            {"ticker": "S5INFT Index", "display_name": "Tecnologia",          "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5FINL Index", "display_name": "Financieros",         "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5HLTH Index", "display_name": "Salud",               "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5COND Index", "display_name": "Consumo Discrecional","bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5CONS Index", "display_name": "Consumo Basico",      "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5ENRS Index", "display_name": "Energia",             "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5INDU Index", "display_name": "Industriales",        "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5MATR Index", "display_name": "Materiales",          "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5TELS Index", "display_name": "Comunicaciones",      "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5UTIL Index", "display_name": "Utilities",           "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "S5RLST Index", "display_name": "Real Estate",         "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+        ],
+        "events": _EVENTS_GLOBAL,
+    },
+    "Tasas US & MX": {
+        "icon": "📈",
+        "description": "Nominales, reales (TIPS/UDIBONOS) y breakevens US & MX",
+        "tickers": [
+            # ── US Nominales ──
+            {"ticker": "GT2 Govt",        "display_name": "US Nom 2Y",      "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GT5 Govt",        "display_name": "US Nom 5Y",      "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GT10 Govt",       "display_name": "US Nom 10Y",     "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GT20 Govt",       "display_name": "US Nom 20Y",     "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GT30 Govt",       "display_name": "US Nom 30Y",     "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            # ── US Reales (TIPS) ──
+            {"ticker": "USGGT02Y Index",  "display_name": "US TIPS 2Y",    "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTII5 Govt",      "display_name": "US TIPS 5Y",    "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTII10 Govt",     "display_name": "US TIPS 10Y",   "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTII20 Govt",     "display_name": "US TIPS 20Y",   "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTII30 Govt",     "display_name": "US TIPS 30Y",   "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            # ── US Breakevens ──
+            {"ticker": "USGGBE02 Index",  "display_name": "US BE 2Y",      "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "USGGBE05 Index",  "display_name": "US BE 5Y",      "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "USGGBE10 Index",  "display_name": "US BE 10Y",     "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            # ── MX Nominales ──
+            {"ticker": "MXIBTIIE Index",  "display_name": "TIIE 28d",      "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXN2Y Govt",    "display_name": "MX Nom 2Y",    "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXN5Y Govt",    "display_name": "MX Nom 5Y",    "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXN10Y Govt",   "display_name": "MX Nom 10Y",   "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXN20Y Govt",   "display_name": "MX Nom 20Y",   "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXN30Y Govt",   "display_name": "MX Nom 30Y",   "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            # ── MX Reales (UDIBONOS) ──
+            {"ticker": "GTMXNII5Y Govt",  "display_name": "MX Real 5Y",   "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXNII10Y Govt", "display_name": "MX Real 10Y",  "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXNII20Y Govt", "display_name": "MX Real 20Y",  "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+            {"ticker": "GTMXNII30Y Govt", "display_name": "MX Real 30Y",  "bloomberg_field": "PX_LAST", "asset_type": "rate", "field_mode": "absolute_change", "baseline_mode": "base0"},
+        ],
+        "events": _EVENTS_GLOBAL + [
+            {"label": "Taper Tantrum",            "date": "2013-05-22"},
+            {"label": "Fed Pivot Dic 2023",       "date": "2023-12-13"},
+        ],
+    },
+    "FX": {
+        "icon": "💱",
+        "description": "Pares principales y emergentes",
+        "tickers": [
+            {"ticker": "USDMXN Curncy", "display_name": "USD/MXN", "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "EURUSD Curncy", "display_name": "EUR/USD", "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "USDJPY Curncy", "display_name": "USD/JPY", "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "GBPUSD Curncy", "display_name": "GBP/USD", "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "DXY Index",     "display_name": "DXY",     "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "USDBRL Curncy", "display_name": "USD/BRL", "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "USDCNH Curncy", "display_name": "USD/CNH", "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "USDZAR Curncy", "display_name": "USD/ZAR", "bloomberg_field": "PX_LAST", "asset_type": "fx", "field_mode": "price_indexed", "baseline_mode": "base100"},
+        ],
+        "events": _EVENTS_GLOBAL + [
+            {"label": "Brexit Referendum",        "date": "2016-06-24"},
+            {"label": "Eleccion MX 2024",         "date": "2024-06-02"},
+        ],
+    },
+    "Commodities": {
+        "icon": "🛢️",
+        "description": "Energeticos, metales preciosos, industriales y agricolas",
+        "tickers": [
+            {"ticker": "CL1 Comdty",  "display_name": "WTI Crudo",    "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "CO1 Comdty",  "display_name": "Brent",        "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "NG1 Comdty",  "display_name": "Gas Natural",  "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "XAU Curncy",  "display_name": "Oro",          "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "XAG Curncy",  "display_name": "Plata",        "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "HG1 Comdty",  "display_name": "Cobre",        "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "LA1 Comdty",  "display_name": "Aluminio",     "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "LIT US Equity","display_name": "Litio (ETF)", "bloomberg_field": "PX_LAST", "asset_type": "equity",    "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "C 1 Comdty",  "display_name": "Maiz",         "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "W 1 Comdty",  "display_name": "Trigo",        "bloomberg_field": "PX_LAST", "asset_type": "commodity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+        ],
+        "events": _EVENTS_GLOBAL + [
+            {"label": "OPEC+ Recorte",            "date": "2020-04-12"},
+            {"label": "Guerra del Golfo",         "date": "1990-08-02"},
+        ],
+    },
+    "Europa & EM": {
+        "icon": "🌍",
+        "description": "Europa, mercados emergentes y riesgo soberano",
+        "tickers": [
+            {"ticker": "SX5E Index",      "display_name": "Euro Stoxx 50",  "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "DAX Index",       "display_name": "DAX",            "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "UKX Index",       "display_name": "FTSE 100",       "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "GDBR10 Index",    "display_name": "Bund 10Y",       "bloomberg_field": "PX_LAST", "asset_type": "rate",   "field_mode": "absolute_change","baseline_mode": "base0"},
+            {"ticker": "MEXBOL Index",    "display_name": "IPC Mexico",     "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "IBOV Index",      "display_name": "Bovespa",        "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "SHCOMP Index",    "display_name": "Shanghai Comp",  "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "MXEF Index",      "display_name": "MSCI EM",        "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "NIFTY Index",     "display_name": "Nifty 50",       "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed", "baseline_mode": "base100"},
+            {"ticker": "HSI Index",       "display_name": "Hang Seng",      "bloomberg_field": "PX_LAST", "asset_type": "equity", "field_mode": "price_indexed",  "baseline_mode": "base100"},
+        ],
+        "events": _EVENTS_GLOBAL + [
+            {"label": "Crisis Deuda EU",          "date": "2011-08-05"},
+            {"label": "Devaluacion CNY",          "date": "2015-08-11"},
+        ],
+    },
+}
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CATALOGO DE EVENTOS DE REFERENCIA (24 eventos)
@@ -510,8 +674,8 @@ def load_from_bloomberg(fields_map: dict, start_date, end_date):
             for t in field_tickers:
                 req.getElement("securities").appendValue(t)
             req.getElement("fields").appendValue(field)
-            req.set("startDt", start_date.strftime("%Y%m%d"))
-            req.set("endDt",   end_date.strftime("%Y%m%d"))
+            req.set("startDate", start_date.strftime("%Y%m%d"))
+            req.set("endDate",   end_date.strftime("%Y%m%d"))
             req.set("periodicitySelection", "DAILY")
             req.set("nonTradingDayFillOption", "ACTIVE_DAYS_ONLY")
             session.sendRequest(req)
@@ -548,6 +712,167 @@ def load_from_bloomberg(fields_map: dict, start_date, end_date):
         return df, None
     except Exception as e:
         return None, f"Error Bloomberg ({type(e).__name__}): {e}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CACHE MAESTRO BLOOMBERG
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Directorio donde vive app.py para guardar el cache junto al proyecto
+_APP_DIR = Path(__file__).resolve().parent
+_CACHE_DIR = _APP_DIR / ".bbg_cache"
+
+# ── Carpeta data/ con archivos Excel default del repo ────────────────────────
+# Estos archivos son los que se versionan en GitHub y sirven como fuente de
+# datos cuando el usuario NO tiene Bloomberg Terminal disponible.
+DATA_DIR = _APP_DIR / "data"
+# Archivo default que se sobrescribe al correr la app localmente con Bloomberg.
+# Cambia este nombre si prefieres otro archivo como "fuente de verdad".
+# (Si lo cambias, asegurate de que el archivo exista en data/ o que sea creado al correr local)
+DEFAULT_DATA_FILENAME = "Data_historica.xlsx"
+DEFAULT_DATA_PATH = DATA_DIR / DEFAULT_DATA_FILENAME
+
+
+def list_default_data_files() -> list[Path]:
+    """Lista los archivos .xlsx/.csv dentro de data/ (ordenados alfabeticamente)."""
+    if not DATA_DIR.exists():
+        return []
+    files = []
+    for ext in ("*.xlsx", "*.xls", "*.csv"):
+        files.extend(DATA_DIR.glob(ext))
+    return sorted(files, key=lambda p: p.name.lower())
+
+
+def load_default_data_file(path: Path, sheet_name=None):
+    """Carga un archivo (CSV o Excel) desde la carpeta data/ del repo."""
+    try:
+        name = str(path).lower()
+        if name.endswith((".xlsx", ".xls")):
+            df = pd.read_excel(path, index_col=0, parse_dates=True,
+                               sheet_name=sheet_name or 0)
+        else:
+            try:
+                df = pd.read_csv(path, index_col=0, parse_dates=True)
+            except Exception:
+                df = pd.read_csv(path, index_col=0, parse_dates=True, sep=";")
+        df.index = pd.to_datetime(df.index, errors="coerce")
+        df = df[df.index.notna()].sort_index()
+        df = df[~df.index.duplicated(keep="last")]
+        df = df.apply(pd.to_numeric, errors="coerce")
+        return df, None
+    except Exception as e:
+        return None, str(e)
+
+
+def get_local_default_sheets(path: Path) -> list[str]:
+    """Hojas disponibles en un Excel local. Lista vacia si es CSV."""
+    name = str(path).lower()
+    if not name.endswith((".xlsx", ".xls")):
+        return []
+    try:
+        return pd.ExcelFile(path).sheet_names
+    except Exception:
+        return []
+
+
+def save_data_to_default_excel(df: pd.DataFrame, target_path: Path = None,
+                                rename_map: dict = None) -> tuple[bool, str]:
+    """Guarda el DataFrame de Bloomberg al archivo Excel default del repo.
+
+    Solo se llama cuando blpapi esta disponible (= corriendo localmente).
+    En Streamlit Cloud el filesystem es read-only y esta funcion no se invoca.
+    """
+    if target_path is None:
+        target_path = DEFAULT_DATA_PATH
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        export_df = df.copy()
+        if rename_map:
+            export_df = export_df.rename(columns={k: v for k, v in rename_map.items()
+                                                  if k in export_df.columns})
+        export_df.index.name = "Date"
+        with pd.ExcelWriter(str(target_path), engine="openpyxl") as writer:
+            export_df.to_excel(writer, sheet_name="Bloomberg Data")
+        return True, str(target_path)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+def _get_all_preset_tickers() -> dict[str, str]:
+    """Recopila todos los tickers únicos de TODOS los TAB_PRESETS.
+    Retorna {ticker: bloomberg_field}."""
+    all_tk: dict[str, str] = {}
+    for _pval in TAB_PRESETS.values():
+        for _tk in _pval["tickers"]:
+            t_id = _tk["ticker"]
+            if t_id not in all_tk:
+                all_tk[t_id] = _tk.get("bloomberg_field", "PX_LAST")
+    return all_tk
+
+def _get_all_preset_names() -> dict[str, str]:
+    """Recopila {ticker: display_name} de todos los presets."""
+    names: dict[str, str] = {}
+    for _pval in TAB_PRESETS.values():
+        for _tk in _pval["tickers"]:
+            t_id = _tk["ticker"]
+            if t_id not in names:
+                names[t_id] = _tk.get("display_name", t_id)
+    return names
+
+def _cache_path_for_date(d: date) -> Path:
+    """Retorna la ruta del archivo cache para una fecha dada."""
+    _CACHE_DIR.mkdir(exist_ok=True)
+    return _CACHE_DIR / f"master_{d.strftime('%Y%m%d')}.pkl"
+
+def load_master_cache(start_date, end_date, force_refresh: bool = False):
+    """Carga o crea el cache maestro con todos los tickers de presets.
+
+    Returns:
+        (DataFrame completo, error_str o None)
+    """
+    today = date.today()
+    cache_file = _cache_path_for_date(today)
+
+    # Si ya existe el cache de hoy y no se fuerza refresh, leer
+    if cache_file.exists() and not force_refresh:
+        try:
+            df = pd.read_pickle(cache_file)
+            df.index = pd.DatetimeIndex(df.index)
+            # Verificar si hay tickers nuevos que no estan en el cache
+            all_tk = _get_all_preset_tickers()
+            missing = {t: f for t, f in all_tk.items() if t not in df.columns}
+            if missing:
+                st.info(f"🔄 Descargando {len(missing)} tickers nuevos...")
+                extra_df, err = load_from_bloomberg(missing, start_date, end_date)
+                if extra_df is not None and not extra_df.empty:
+                    df = pd.concat([df, extra_df], axis=1)
+                    df.to_pickle(cache_file)
+            return df, None
+        except Exception as e:
+            st.warning(f"⚠️ Error leyendo cache, re-descargando: {e}")
+
+    # Descargar todo desde Bloomberg
+    all_tk = _get_all_preset_tickers()
+    st.info(f"📡 Descargando {len(all_tk)} tickers de todas las categorias...")
+    df, err = load_from_bloomberg(all_tk, start_date, end_date)
+    if err:
+        return None, err
+    if df is None or df.empty:
+        return None, "Bloomberg no devolvio datos."
+
+    # Guardar cache
+    try:
+        df.to_pickle(cache_file)
+    except Exception:
+        pass  # Si no puede guardar, no pasa nada — funciona sin cache
+
+    # Limpiar caches antiguos (mantener solo ultimos 5 dias)
+    try:
+        for old_file in sorted(_CACHE_DIR.glob("master_*.pkl"))[:-5]:
+            old_file.unlink()
+    except Exception:
+        pass
+
+    return df, None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -641,6 +966,19 @@ def extract_aligned_values(series, event_date, lookback, lookforward, frequency,
 # TRANSFORMACIONES
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _find_anchor(raw_dict: dict) -> float:
+    """Busca el valor en T=0; si no existe, usa el valor disponible mas cercano a T=0."""
+    anchor = raw_dict.get(0, np.nan)
+    if not pd.isna(anchor):
+        return anchor
+    # Buscar el periodo mas cercano a 0 que tenga dato
+    candidates = [(abs(p), p) for p, v in raw_dict.items() if not pd.isna(v)]
+    if not candidates:
+        return np.nan
+    candidates.sort()
+    return raw_dict[candidates[0][1]]
+
+
 def apply_transformation(raw_dict: dict, field_mode: str, baseline_mode: str) -> dict:
     """
     Transforma valores alineados.
@@ -649,7 +987,7 @@ def apply_transformation(raw_dict: dict, field_mode: str, baseline_mode: str) ->
     - cumulative_return / pct_change => (v/anchor - 1)*100
     - absolute_change => v - anchor
     """
-    anchor = raw_dict.get(0, np.nan)
+    anchor = _find_anchor(raw_dict)
     if pd.isna(anchor):
         return {p: np.nan for p in raw_dict}
 
@@ -690,7 +1028,7 @@ def apply_transformation(raw_dict: dict, field_mode: str, baseline_mode: str) ->
 def build_period_labels(periods, freq):
     fl = FREQ_LABEL.get(freq, "T")
     return [
-        "Evento (T0)" if p == 0 else (f"{fl}+{p}" if p > 0 else f"{fl}{p}")
+        "T=0" if p == 0 else (f"{fl}+{p}" if p > 0 else f"{fl}{p}")
         for p in periods
     ]
 
@@ -750,7 +1088,7 @@ def create_event_chart(
             line=dict(color=color, width=line_w),
             marker=dict(size=marker_s, color=color),
             opacity=opacity,
-            hovertext=hover, hoverinfo="text", connectgaps=False,
+            hovertext=hover, hoverinfo="text", connectgaps=True,
         ))
 
     # ── Linea promedio ────────────────────────────────────────────────────────
@@ -789,20 +1127,35 @@ def create_event_chart(
     tick_vals = [p for i_p, p in enumerate(all_periods) if i_p % step == 0 or p == 0]
     tick_text = [label_map[p] for p in tick_vals]
 
+    # Colores adaptativos: usar negro en tema claro, funciona en ambos
+    _tk_color = "#111111"
+    _grid_color = "rgba(0,0,0,0.10)"
+
     fig.update_layout(
         title=dict(text=f"<b>{display_name or ticker_id}</b>",
-                   font=dict(size=15, color=PALETTE["azul"]), x=0),
-        xaxis=dict(title="Periodo relativo al evento",
-                   tickvals=tick_vals, ticktext=tick_text,
-                   gridcolor="#ebebeb", zeroline=False,
-                   tickfont=dict(size=11, color="#555")),
-        yaxis=dict(title=y_title, gridcolor="#ebebeb",
-                   tickfont=dict(size=11, color="#555")),
-        plot_bgcolor="white", paper_bgcolor="white", hovermode="closest",
-        legend=dict(orientation="h", yanchor="bottom", y=-0.42,
-                    xanchor="center", x=0.5, font=dict(size=11),
+                   font=dict(size=16, color=PALETTE["azul"], family="Arial"), x=0),
+        xaxis=dict(
+            title=dict(text="Periodo relativo al evento",
+                       font=dict(size=12, color=_tk_color, family="Arial")),
+            tickvals=tick_vals, ticktext=tick_text,
+            gridcolor=_grid_color, zeroline=False,
+            tickangle=0,  # sin rotar
+            tickfont=dict(size=11, color=_tk_color, family="Arial"),
+        ),
+        yaxis=dict(
+            title=dict(text=y_title,
+                       font=dict(size=12, color=_tk_color, family="Arial")),
+            gridcolor=_grid_color,
+            tickfont=dict(size=11, color=_tk_color, family="Arial"),
+        ),
+        plot_bgcolor="rgba(0,0,0,0)",   # transparente para ambos temas
+        paper_bgcolor="rgba(0,0,0,0)",
+        hovermode="closest",
+        legend=dict(orientation="h", yanchor="bottom", y=-0.35,
+                    xanchor="center", x=0.5,
+                    font=dict(size=11, color=_tk_color, family="Arial"),
                     bordercolor=PALETTE["azul_grisaceo"], borderwidth=1),
-        height=490, margin=dict(l=70, r=30, t=55, b=140),
+        height=490, margin=dict(l=70, r=30, t=55, b=120),
     )
     return fig
 
@@ -888,6 +1241,12 @@ def main():
     /* Primary button con azul */
     .stButton>button[kind="primary"]{background-color:#003746;border-color:#003746}
     .stButton>button[kind="primary"]:hover{background-color:#005162;border-color:#005162}
+
+    /* ── Fix: forzar scroll en contenedor principal ── */
+    [data-testid="stAppViewContainer"] > .main {overflow: auto !important}
+    .stMainBlockContainer {overflow: visible !important}
+    [data-testid="stVerticalBlockBorderWrapper"] {overflow: visible !important}
+    section.main > div {overflow: visible !important}
     </style>
     """, unsafe_allow_html=True)
 
@@ -908,11 +1267,7 @@ def main():
         return st.session_state._ev_uid_counter
 
     if "events" not in st.session_state:
-        st.session_state.events = [
-            {"label": "COVID Crash",         "date": "2020-03-16", "_uid": _next_ev_uid()},
-            {"label": "Russia-Ukraine",      "date": "2022-02-24", "_uid": _next_ev_uid()},
-            {"label": "SVB Crisis",          "date": "2023-03-10", "_uid": _next_ev_uid()},
-        ]
+        st.session_state.events = []
     # Migrar eventos sin _uid (por si vienen de sesion anterior)
     for ev in st.session_state.events:
         if "_uid" not in ev:
@@ -933,43 +1288,115 @@ def main():
         data_source = st.radio("", ["📂 CSV / Excel", "🔵 Bloomberg"], label_visibility="collapsed")
         use_bloomberg = "Bloomberg" in data_source
         data_df = None
+        # data_source_kind: identifica el origen real para decidir flujo (PDF categorias vs flat).
+        #   "bloomberg" → datos descargados desde Bloomberg (presets soportados)
+        #   "default"   → archivo .xlsx/.csv del repo (presets soportados)
+        #   "upload"    → CSV/Excel subido por el usuario (PDF en modo flat)
+        data_source_kind = "bloomberg" if use_bloomberg else "upload"
 
         if not use_bloomberg:
-            st.caption("Sube tu archivo de precios historicos.")
-            uploaded = st.file_uploader("", type=["csv","xlsx","xls"], label_visibility="collapsed")
+            # ── Toggle: usar archivo default del repo ──
+            default_files = list_default_data_files()
+            has_defaults = len(default_files) > 0
+
+            # data_source_kind: "upload" (usuario sube su CSV) | "default" (archivo del repo)
+            # Se persiste en session_state para que el flujo de PDF pueda diferenciar.
+            data_source_kind = "upload"
+            if has_defaults:
+                use_default = st.checkbox(
+                    "📦 Usar archivo default del repo",
+                    value=False,
+                    help=(
+                        f"Carga un archivo desde la carpeta `data/` del repositorio "
+                        f"({len(default_files)} archivo{'s' if len(default_files) > 1 else ''} "
+                        f"disponible{'s' if len(default_files) > 1 else ''}). "
+                        f"Estos archivos los mantiene actualizados el dueno del proyecto."
+                    ),
+                    key="use_default_repo_file",
+                )
+                if use_default:
+                    data_source_kind = "default"
+            else:
+                st.caption("ℹ️ No hay archivos default en `data/`. Sube tu propio archivo.")
+
             selected_sheet = None
-            if uploaded:
-                # Detectar hojas del Excel (vacio si es CSV)
-                sheets = get_excel_sheet_names(uploaded)
-                if len(sheets) >= 1:
+
+            if data_source_kind == "default":
+                # Selector de archivo dentro de data/
+                file_names = [p.name for p in default_files]
+                default_idx = 0
+                if DEFAULT_DATA_FILENAME in file_names:
+                    default_idx = file_names.index(DEFAULT_DATA_FILENAME)
+                chosen_name = st.selectbox(
+                    "📁 Archivo del repo:",
+                    file_names,
+                    index=default_idx,
+                    key="default_file_selector",
+                    help=f"El archivo marcado por defecto es `{DEFAULT_DATA_FILENAME}`.",
+                )
+                chosen_path = DATA_DIR / chosen_name
+
+                # Sheets si es Excel
+                sheets_local = get_local_default_sheets(chosen_path)
+                if len(sheets_local) >= 1:
                     selected_sheet = st.selectbox(
-                        f"📄 Hoja del Excel ({len(sheets)} disponible{'s' if len(sheets)>1 else ''}):",
-                        sheets,
-                        index=0, key="sheet_selector",
+                        f"📄 Hoja del Excel ({len(sheets_local)} disponible{'s' if len(sheets_local)>1 else ''}):",
+                        sheets_local, index=0, key="default_sheet_selector",
                     )
 
-                # Construir clave unica (archivo + hoja) para auto-deteccion
-                sheet_tag = selected_sheet or "0"
-                file_key = f"{uploaded.name}_{uploaded.size}_{sheet_tag}"
-
-                data_df, err = load_from_file(uploaded, sheet_name=selected_sheet)
+                file_key = f"DEFAULT_{chosen_name}_{selected_sheet or '0'}"
+                data_df, err = load_default_data_file(chosen_path, sheet_name=selected_sheet)
                 if err:
-                    st.error(f"Error: {err}")
+                    st.error(f"Error al leer `{chosen_name}`: {err}")
                 else:
                     st.markdown(
                         f'<div class="status-ok">✅ {len(data_df.columns)} series · '
                         f'{len(data_df):,} fechas<br>'
-                        f'{data_df.index[0].date()} → {data_df.index[-1].date()}</div>',
+                        f'{data_df.index[0].date()} → {data_df.index[-1].date()}<br>'
+                        f'<span style="font-size:.78rem;opacity:.8">📦 default repo: {chosen_name}</span></div>',
                         unsafe_allow_html=True,
                     )
-                    # *** AUTO-DETECTAR tickers al subir archivo / cambiar hoja ***
                     if st.session_state.last_file_key != file_key:
                         st.session_state.last_file_key = file_key
                         st.session_state.tickers = auto_detect_tickers(data_df)
                         st.rerun()
-
                     with st.expander("Vista previa"):
                         st.dataframe(data_df.tail(5), use_container_width=True)
+            else:
+                st.caption("Sube tu archivo de precios historicos.")
+                uploaded = st.file_uploader("", type=["csv","xlsx","xls"], label_visibility="collapsed")
+                if uploaded:
+                    # Detectar hojas del Excel (vacio si es CSV)
+                    sheets = get_excel_sheet_names(uploaded)
+                    if len(sheets) >= 1:
+                        selected_sheet = st.selectbox(
+                            f"📄 Hoja del Excel ({len(sheets)} disponible{'s' if len(sheets)>1 else ''}):",
+                            sheets,
+                            index=0, key="sheet_selector",
+                        )
+
+                    # Construir clave unica (archivo + hoja) para auto-deteccion
+                    sheet_tag = selected_sheet or "0"
+                    file_key = f"{uploaded.name}_{uploaded.size}_{sheet_tag}"
+
+                    data_df, err = load_from_file(uploaded, sheet_name=selected_sheet)
+                    if err:
+                        st.error(f"Error: {err}")
+                    else:
+                        st.markdown(
+                            f'<div class="status-ok">✅ {len(data_df.columns)} series · '
+                            f'{len(data_df):,} fechas<br>'
+                            f'{data_df.index[0].date()} → {data_df.index[-1].date()}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        # *** AUTO-DETECTAR tickers al subir archivo / cambiar hoja ***
+                        if st.session_state.last_file_key != file_key:
+                            st.session_state.last_file_key = file_key
+                            st.session_state.tickers = auto_detect_tickers(data_df)
+                            st.rerun()
+
+                        with st.expander("Vista previa"):
+                            st.dataframe(data_df.tail(5), use_container_width=True)
         else:
             if BLOOMBERG_AVAILABLE:
                 st.markdown('<div class="status-ok">✅ blpapi detectado</div>', unsafe_allow_html=True)
@@ -984,29 +1411,97 @@ def main():
 
         # ── Eventos ───────────────────────────────────────────────────────────
         st.markdown('<div class="sec-title">📅 Eventos</div>', unsafe_allow_html=True)
+        st.caption(f"{len(st.session_state.events)} eventos activos")
 
+        # Calcular rango activo de fechas (para el aviso ⚠️ fuera de rango).
+        #   Bloomberg → [Desde, Hasta]
+        #   CSV/Excel → [primera fecha, ultima fecha] del data_df cargado
+        _range_start = None
+        _range_end = None
+        if use_bloomberg:
+            _range_start = bbg_start
+            _range_end   = bbg_end
+        elif data_df is not None and len(data_df) > 0:
+            _range_start = data_df.index[0].date()
+            _range_end   = data_df.index[-1].date()
+
+        def _ev_out_of_range(ev_date_str: str) -> bool:
+            if _range_start is None or _range_end is None:
+                return False
+            try:
+                d = pd.Timestamp(ev_date_str).date()
+                return d < _range_start or d > _range_end
+            except Exception:
+                return False
+
+        # Lista compacta con boton de eliminar por evento
         remove_ev = None
         for i, ev in enumerate(st.session_state.events):
             uid = ev["_uid"]
-            with st.expander(f"🔴 {ev['label']}", expanded=(i == 0)):
-                c1, c2 = st.columns([3, 2])
-                with c1:
-                    new_label = st.text_input("Nombre", value=ev["label"], key=f"el_{uid}")
-                with c2:
-                    new_date = st.text_input("Fecha", value=ev["date"], key=f"ed_{uid}", help="YYYY-MM-DD")
-                st.session_state.events[i] = {"label": new_label, "date": new_date, "_uid": uid}
-                if len(st.session_state.events) > 1:
-                    if st.button("🗑 Eliminar", key=f"re_{uid}", use_container_width=True):
-                        remove_ev = i
+            out_of_range = _ev_out_of_range(ev["date"])
+            c_name, c_date, c_warn, c_del = st.columns([5, 3, 0.7, 1])
+            with c_name:
+                new_label = st.text_input("ev", value=ev["label"], key=f"el_{uid}", label_visibility="collapsed")
+            with c_date:
+                new_date = st.text_input("dt", value=ev["date"], key=f"ed_{uid}", label_visibility="collapsed")
+            with c_warn:
+                if out_of_range:
+                    tip = (f"Fuera del rango de datos cargados "
+                           f"({_range_start} → {_range_end}). "
+                           f"Ajusta el rango o el evento.")
+                    st.markdown(
+                        f"<div style='font-size:1.15rem;padding-top:4px;text-align:center;' "
+                        f"title='{tip}'>⚠️</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown("&nbsp;", unsafe_allow_html=True)
+            with c_del:
+                if st.button("❌", key=f"re_{uid}", help=f"Quitar {ev['label']}"):
+                    remove_ev = i
+            st.session_state.events[i] = {"label": new_label, "date": new_date, "_uid": uid}
+
         if remove_ev is not None:
             st.session_state.events.pop(remove_ev)
             st.rerun()
 
-        if st.button("➕ Agregar evento manual", use_container_width=True):
-            n = len(st.session_state.events) + 1
-            st.session_state.events.append({"label": f"Evento {n}", "date": "2024-01-01", "_uid": _next_ev_uid()})
-            st.rerun()
-        st.caption("💡 Usa el catalogo de eventos en el area principal para agregar desde la lista de referencia.")
+        # Botones de accion
+        btn_c1, btn_c2 = st.columns(2)
+        with btn_c1:
+            if st.button("➕ Agregar", use_container_width=True):
+                n = len(st.session_state.events) + 1
+                st.session_state.events.append({"label": f"Evento {n}", "date": "2024-01-01", "_uid": _next_ev_uid()})
+                st.rerun()
+        with btn_c2:
+            if st.button("🗑️ Limpiar todos", use_container_width=True):
+                st.session_state.events = []
+                st.rerun()
+
+        with st.expander("📋 Catalogo de referencia", expanded=False):
+            st.caption("Selecciona eventos y presiona el boton para agregarlos.")
+            selected = st.multiselect(
+                "Eventos a agregar:",
+                options=[f"{e['label']} ({e['date']})" for e in REFERENCE_EVENTS],
+                key="ref_event_selector",
+            )
+            if selected:
+                if st.button("✅ Agregar seleccionados", use_container_width=True):
+                    added = 0
+                    existing_dates = {e["date"] for e in st.session_state.events}
+                    for sel in selected:
+                        for ref_ev in REFERENCE_EVENTS:
+                            if f"{ref_ev['label']} ({ref_ev['date']})" == sel:
+                                if ref_ev["date"] not in existing_dates:
+                                    st.session_state.events.append(
+                                        {"label": ref_ev["label"], "date": ref_ev["date"], "_uid": _next_ev_uid()}
+                                    )
+                                    existing_dates.add(ref_ev["date"])
+                                    added += 1
+                    if added > 0:
+                        st.success(f"✅ {added} agregado{'s' if added > 1 else ''}")
+                        st.rerun()
+                    else:
+                        st.info("Ya estan en tu lista.")
 
         # ── Destacar un evento (justo despues de eventos) ─────────────────────
         event_labels = [ev["label"] for ev in st.session_state.events]
@@ -1125,41 +1620,242 @@ def main():
         st.divider()
         run = st.button("🚀 Ejecutar analisis", type="primary", use_container_width=True)
 
+        # ── Generar reporte PDF ────────────────────────────────────────────────
+        # Disponible en TODOS los modos (Bloomberg / default / upload).
+        # Modo categorico: Bloomberg o archivo default del repo.
+        # Modo flat:       CSV/Excel subido por el usuario (sus tickers en una sola seccion).
+        _pdf_available = use_bloomberg or (data_df is not None)
+        if _pdf_available:
+            st.divider()
+            st.markdown('<div class="sec-title">📄 Reporte PDF</div>', unsafe_allow_html=True)
+            if data_source_kind == "upload":
+                st.caption("Modo *flat*: PDF con tus tickers en una sola sección.")
+            else:
+                st.caption("Genera un PDF ejecutivo con todas las categorias y graficas.")
+
+            generate_pdf = st.button("📄 Generar Reporte PDF", use_container_width=True)
+            if generate_pdf:
+                if not st.session_state.events:
+                    st.error("❌ Agrega al menos un evento antes de generar el reporte.")
+                else:
+                    from generate_report import build_full_report
+                    pdf_data_df = None
+                    pdf_tickers_override = None
+                    pdf_subtitle = None
+
+                    if use_bloomberg:
+                        with st.spinner("📡 Cargando datos y generando reporte..."):
+                            force_refresh = st.session_state.get("_bbg_force_refresh", False)
+                            pdf_data_df, err = load_master_cache(
+                                bbg_start, bbg_end, force_refresh=force_refresh,
+                            )
+                        if err:
+                            st.error(f"❌ {err}")
+                            pdf_data_df = None
+                        elif pdf_data_df is None or pdf_data_df.empty:
+                            st.error("❌ Sin datos Bloomberg.")
+                            pdf_data_df = None
+                    else:
+                        # Modo CSV/Excel (default o upload) → usar data_df cargado.
+                        pdf_data_df = data_df
+                        if data_source_kind == "upload":
+                            # Modo flat: usar los tickers del sidebar
+                            pdf_tickers_override = [
+                                {
+                                    "ticker": tk["ticker"],
+                                    "display_name": tk.get("display_name", tk["ticker"]),
+                                    "field_mode": tk.get("field_mode", "price_indexed"),
+                                    "baseline_mode": tk.get("baseline_mode", "base100"),
+                                    "csv_column": tk.get("csv_column", tk["ticker"]),
+                                }
+                                for tk in st.session_state.tickers
+                            ]
+                            if not pdf_tickers_override:
+                                st.error("❌ Agrega al menos un ticker en la barra lateral.")
+                                pdf_data_df = None
+                            pdf_subtitle = "Reporte basado en CSV/Excel del usuario"
+
+                    if pdf_data_df is not None and not pdf_data_df.empty:
+                        with st.spinner("📄 Generando graficas y compilando PDF..."):
+                            pdf_path = build_full_report(
+                                events=st.session_state.events,
+                                data_df=pdf_data_df,
+                                lookback=lookback,
+                                lookforward=lookforward,
+                                frequency=frequency,
+                                agg_method=agg_method,
+                                tickers_override=pdf_tickers_override,
+                                report_subtitle=pdf_subtitle,
+                            )
+                        if pdf_path and pdf_path.exists():
+                            with open(pdf_path, "rb") as f:
+                                st.download_button(
+                                    "📥 Descargar Reporte PDF",
+                                    f.read(),
+                                    file_name=pdf_path.name,
+                                    mime="application/pdf",
+                                    use_container_width=True,
+                                )
+                            st.success("✅ Reporte generado")
+                        else:
+                            st.error("❌ Error al generar el PDF. Verifica que pdflatex este instalado.")
+
     # ══════════════════════════════════════════════════════════════════════════
     # CONTENIDO PRINCIPAL
     # ══════════════════════════════════════════════════════════════════════════
 
-    # ── Catalogo de eventos de referencia ─────────────────────────────────────
-    with st.expander("📋 Catalogo de Eventos de Referencia", expanded=False):
-        st.caption("Selecciona eventos y presiona el boton para agregarlos a tu analisis.")
-        ev_df = pd.DataFrame(REFERENCE_EVENTS)
-        ev_df.index = range(1, len(ev_df) + 1)
-        ev_df.columns = ["Evento", "Fecha"]
-        st.dataframe(ev_df, use_container_width=True, height=300)
+    # ══════════════════════════════════════════════════════════════════════════
+    # TABS PRINCIPALES (Guia + Presets + Manual)
+    # ══════════════════════════════════════════════════════════════════════════
+    preset_run = False
+    preset_tickers = None
+    preset_run_key = None  # nombre de la categoria que se ejecuto (para titular el resultado)
 
-        selected = st.multiselect(
-            "Eventos a agregar:",
-            options=[f"{e['label']} ({e['date']})" for e in REFERENCE_EVENTS],
-            key="ref_event_selector",
+    st.markdown("### ⚡ Analisis rapido por categoria")
+    st.caption(
+        "Empieza por la **📖 Guía de uso** si es tu primera vez. "
+        "Luego elige una categoría o usa el modo **📂 Manual** para configurar tus propios tickers."
+    )
+
+    guide_tab_name   = "📖 Guía de uso"
+    preset_tab_names = [f"{v['icon']} {k}" for k, v in TAB_PRESETS.items()]
+    manual_tab_name  = "📂 Manual"
+    tab_names = [guide_tab_name] + preset_tab_names + [manual_tab_name]
+    ui_tabs = st.tabs(tab_names)
+
+    # ── Tab 0: Guia de uso ────────────────────────────────────────────────────
+    with ui_tabs[0]:
+        st.markdown("## 📖 Guía de uso del dashboard")
+        st.markdown(
+            "Este dashboard compara cómo se comportan distintos activos financieros "
+            "alrededor de fechas de eventos clave (crisis, decisiones de política monetaria, "
+            "elecciones, etc.). Hay **dos formas de ejecutar un análisis** y es importante "
+            "no confundirlas."
         )
-        if selected:
-            if st.button("✅ Agregar seleccionados", use_container_width=True):
-                added = 0
-                existing_dates = {e["date"] for e in st.session_state.events}
-                for sel in selected:
-                    for ref_ev in REFERENCE_EVENTS:
-                        if f"{ref_ev['label']} ({ref_ev['date']})" == sel:
-                            if ref_ev["date"] not in existing_dates:
-                                st.session_state.events.append(
-                                    {"label": ref_ev["label"], "date": ref_ev["date"], "_uid": _next_ev_uid()}
-                                )
-                                existing_dates.add(ref_ev["date"])
-                                added += 1
-                if added > 0:
-                    st.success(f"✅ {added} evento{'s' if added > 1 else ''} agregado{'s' if added > 1 else ''}")
-                    st.rerun()
-                else:
-                    st.info("Esos eventos ya estan en tu lista.")
+
+        st.markdown("### 🅰️  Análisis por categoría (recomendado para empezar)")
+        st.markdown(
+            "1. Configura **eventos** en la barra lateral (pestaña 📅 Eventos).\n"
+            "2. Elige la fuente de datos en la barra lateral (📦 archivo default del repo, "
+            "📂 sube tu propio CSV/Excel, o 🔵 Bloomberg si lo tienes).\n"
+            "3. Entra a la categoría que te interesa (ej. **🌎 General**, **📊 Sectores S&P**, etc.).\n"
+            "4. Presiona el botón **🚀 Ejecutar {Categoría}** que está dentro de la pestaña.\n\n"
+            "👉 Estos botones usan los tickers ya pre-configurados de cada categoría — "
+            "**no** necesitas agregar tickers manualmente."
+        )
+
+        st.markdown("### 🅱️  Análisis manual (tickers personalizados)")
+        st.markdown(
+            "1. Ve a la pestaña **📂 Manual**.\n"
+            "2. En la barra lateral, agrega los tickers que quieres analizar "
+            "(sección **📈 Tickers** → ➕ Agregar ticker).\n"
+            "3. Configura sus parámetros (tipo de activo, transformación, baseline).\n"
+            "4. Presiona **🚀 Ejecutar análisis** que está **al final de la barra lateral**.\n\n"
+            "⚠️ **Si presionas \"Ejecutar análisis\" de la barra lateral sin haber agregado tickers, "
+            "no aparecerá nada** — el botón está esperando tus tickers."
+        )
+
+        st.markdown("### 📅 ¿Cómo agregar eventos?")
+        st.markdown(
+            "En la barra lateral, sección **📅 Eventos**:\n"
+            "- Botón **➕ Agregar** crea un evento vacío que puedes editar (label + fecha YYYY-MM-DD).\n"
+            "- El expander **📋 Catálogo de referencia** trae 25 eventos históricos pre-cargados "
+            "(COVID, Lehman, Brexit, etc.); selecciónalos y dale **✅ Agregar seleccionados**.\n"
+            "- Cada categoría también tiene sus propios eventos default cuando ejecutas su preset.\n\n"
+            "Si un evento queda **fuera del rango de tus datos** (Bloomberg Desde/Hasta o el rango "
+            "del Excel cargado), aparecerá un ⚠️ junto a la fecha. El análisis igual se ejecuta, "
+            "pero ese evento puede salir vacío."
+        )
+
+        st.markdown("### 📁 Fuentes de datos")
+        st.markdown(
+            "**📦 Archivo default del repo** — Hay archivos `.xlsx` en la carpeta `data/` del "
+            "repositorio que se mantienen actualizados. Activa el checkbox **\"Usar archivo "
+            "default del repo\"** y elige el archivo. Funciona con todas las categorías y con PDF.\n\n"
+            "**📂 CSV / Excel propio** — Sube tu archivo. La primera columna deben ser fechas "
+            "y cada columna siguiente un ticker. Los tickers se auto-detectan al subir el archivo.\n\n"
+            "**🔵 Bloomberg** — Requiere Bloomberg Terminal abierto en la misma máquina y `blpapi` "
+            "instalado. Define el rango con **Desde** y **Hasta**. Cuando se corre localmente con "
+            "Bloomberg, los datos descargados se **guardan automáticamente** en `data/" +
+            DEFAULT_DATA_FILENAME + "` para tener una copia."
+        )
+
+        st.markdown("### 📄 Generar Reporte PDF")
+        st.markdown(
+            "El botón **📄 Generar Reporte PDF** aparece en la barra lateral cuando hay datos "
+            "cargados (Bloomberg o CSV/Excel).\n\n"
+            "- Con archivo **default** del repo o con **Bloomberg**: el PDF cubre todas las "
+            "categorías (General, Sectores, Tasas, FX, Commodities, Europa & EM).\n"
+            "- Con un **CSV/Excel propio**: el PDF se genera en modo *flat* — sólo con los "
+            "tickers detectados en tu archivo, en una sola sección.\n\n"
+            "Requiere `pdflatex` instalado en el sistema."
+        )
+
+        st.markdown("### 💡 Tips rápidos")
+        st.markdown(
+            "- **Frecuencia** (Diaria/Semanal/Mensual/Anual) controla los pasos de la ventana.\n"
+            "- **Lookback / Lookforward** son los periodos antes/después del evento.\n"
+            "- **Destacar evento** atenúa los demás eventos en la gráfica para resaltar uno.\n"
+            "- Usa el expander **📚 Catálogo de Tickers Bloomberg** abajo para encontrar IDs."
+        )
+
+    # ── Tabs de presets ───────────────────────────────────────────────────────
+    for tab_idx, (preset_key, preset_val) in enumerate(TAB_PRESETS.items()):
+        with ui_tabs[tab_idx + 1]:  # +1 por el tab de Guia
+            st.markdown(f"**{preset_key}** — {preset_val['description']}")
+
+            # Mostrar tickers en grid compacto
+            n_cols = 4
+            tk_list = preset_val["tickers"]
+            for row_start in range(0, len(tk_list), n_cols):
+                cols = st.columns(n_cols)
+                for col_idx, tk_p in enumerate(tk_list[row_start:row_start + n_cols]):
+                    with cols[col_idx]:
+                        at_emoji = {"equity":"📈","rate":"📊","fx":"💱","commodity":"🛢️","other":"📋"}.get(tk_p.get("asset_type",""),"📈")
+                        st.markdown(f"{at_emoji} **{tk_p['display_name']}**")
+                        st.caption(tk_p["ticker"])
+
+            # Mostrar eventos actuales de la sidebar
+            n_ev = len(st.session_state.events)
+            if n_ev > 0:
+                ev_str = " · ".join(e["label"] for e in st.session_state.events)
+                st.markdown(f"<div style='font-size:0.82rem;color:#5A6670;margin:6px 0 10px;'>"
+                            f"📅 {ev_str}</div>", unsafe_allow_html=True)
+            else:
+                st.warning("⚠️ Agrega al menos un evento en la barra lateral antes de ejecutar.")
+
+            # En modo CSV/Excel, avisar si pocas columnas matchean los tickers del preset
+            if not use_bloomberg and data_df is not None:
+                preset_ticker_ids = {tk_p["ticker"] for tk_p in tk_list}
+                avail_cnt = sum(1 for t in preset_ticker_ids if t in data_df.columns)
+                if avail_cnt == 0:
+                    st.error(
+                        f"❌ Ninguno de los {len(preset_ticker_ids)} tickers de **{preset_key}** "
+                        f"está en tu archivo. Verifica los headers de tu Excel/CSV o cambia de fuente."
+                    )
+                elif avail_cnt < len(preset_ticker_ids):
+                    st.info(
+                        f"ℹ️ {avail_cnt} de {len(preset_ticker_ids)} tickers disponibles en tu archivo. "
+                        f"Los faltantes se omitirán."
+                    )
+
+            if st.button(f"🚀 Ejecutar {preset_key}", key=f"preset_run_{preset_key}",
+                         type="primary", use_container_width=True):
+                preset_run = True
+                preset_run_key = preset_key
+                # Para modo CSV/Excel: setear csv_column = ticker para que el pipeline existente
+                # busque la columna por nombre del ticker.
+                preset_tickers = [
+                    {**dict(tk_p), "csv_column": tk_p["ticker"]}
+                    for tk_p in preset_val["tickers"]
+                ]
+
+    # ── Tab Manual ────────────────────────────────────────────────────────────
+    with ui_tabs[-1]:
+        st.info(
+            "Configura tus tickers y eventos en la barra lateral, luego presiona "
+            "**🚀 Ejecutar análisis** al final de la barra lateral."
+        )
 
     # ── Catalogo de tickers Bloomberg ─────────────────────────────────────────
     with st.expander("📚 Catalogo de Tickers Bloomberg (referencia)"):
@@ -1186,38 +1882,44 @@ def main():
         st.dataframe(cat_df, use_container_width=True, height=300)
 
     # ── Pantalla inicial ──────────────────────────────────────────────────────
-    if not run:
-        col_a, col_b = st.columns([3, 2])
-        with col_a:
-            st.info("👈 Configura en el panel izquierdo y presiona **🚀 Ejecutar analisis**.\n\n"
-                    "Al subir un CSV/Excel, los tickers se detectan automaticamente.")
-            with st.expander("📋 Formato esperado del CSV/Excel"):
-                st.markdown(
-                    "**Primera columna**: Fechas. **Columnas siguientes**: una serie "
-                    "por columna con el nombre del ticker como encabezado."
-                )
-                sp = pd.DataFrame({
-                    "SPX Index":[3257.85,3265.35,2480.64,2304.92],
-                    "USGG10YR Index":[1.88,1.90,0.73,0.76],
-                    "USDMXN Curncy":[18.87,18.90,24.51,23.04],
-                    "XAU Curncy":[1520.0,1547.8,1477.2,1680.0],
-                }, index=pd.to_datetime(["2020-01-02","2020-01-03","2020-03-16","2020-04-01"]))
-                sp.index.name = "Date"
-                st.dataframe(sp, use_container_width=True)
-                st.download_button("⬇️ CSV de muestra (2015-2024)", generate_sample_csv(),
-                                   "sample_event_study.csv", "text/csv", use_container_width=True)
-        with col_b:
-            st.markdown("#### 💡 Eventos de referencia")
-            for ev in REFERENCE_EVENTS[:12]:
-                st.markdown(f"- **{ev['label']}** — `{ev['date']}`")
-            st.caption(f"...y {len(REFERENCE_EVENTS)-12} mas. Usa el boton 📋 Catalogo en la sidebar.")
+    if not run and not preset_run:
+        if not use_bloomberg:
+            col_a, col_b = st.columns([3, 2])
+            with col_a:
+                st.info("👈 Configura en el panel izquierdo y presiona **🚀 Ejecutar analisis**.\n\n"
+                        "Al subir un CSV/Excel, los tickers se detectan automaticamente.")
+                with st.expander("📋 Formato esperado del CSV/Excel"):
+                    st.markdown(
+                        "**Primera columna**: Fechas. **Columnas siguientes**: una serie "
+                        "por columna con el nombre del ticker como encabezado."
+                    )
+                    sp = pd.DataFrame({
+                        "SPX Index":[3257.85,3265.35,2480.64,2304.92],
+                        "USGG10YR Index":[1.88,1.90,0.73,0.76],
+                        "USDMXN Curncy":[18.87,18.90,24.51,23.04],
+                        "XAU Curncy":[1520.0,1547.8,1477.2,1680.0],
+                    }, index=pd.to_datetime(["2020-01-02","2020-01-03","2020-03-16","2020-04-01"]))
+                    sp.index.name = "Date"
+                    st.dataframe(sp, use_container_width=True)
+                    st.download_button("⬇️ CSV de muestra (2015-2024)", generate_sample_csv(),
+                                       "sample_event_study.csv", "text/csv", use_container_width=True)
+            with col_b:
+                st.markdown("#### 💡 Eventos de referencia")
+                for ev in REFERENCE_EVENTS[:12]:
+                    st.markdown(f"- **{ev['label']}** — `{ev['date']}`")
+                st.caption(f"...y {len(REFERENCE_EVENTS)-12} mas. Usa el 📋 Catalogo en la barra lateral.")
         return
 
     # ══════════════════════════════════════════════════════════════════════════
     # VALIDACION
     # ══════════════════════════════════════════════════════════════════════════
-    events  = st.session_state.events
-    tickers = st.session_state.tickers
+
+    # Eventos siempre vienen de la sidebar; tickers del preset o de la sidebar
+    events = st.session_state.events
+    if preset_run and preset_tickers is not None:
+        tickers = preset_tickers
+    else:
+        tickers = st.session_state.tickers
 
     valid_events = []
     for ev in events:
@@ -1233,11 +1935,15 @@ def main():
         st.error("❌ Agrega al menos un ticker (sube un archivo o agrega manualmente).")
         return
 
+    # Si highlight_event no esta en los eventos activos, ignorar
+    active_labels = {ev["label"] for ev in valid_events}
+    if highlight_event is not None and highlight_event not in active_labels:
+        highlight_event = None
+
     # ══════════════════════════════════════════════════════════════════════════
-    # CARGA BLOOMBERG
+    # CARGA BLOOMBERG (con cache maestro)
     # ══════════════════════════════════════════════════════════════════════════
     if use_bloomberg:
-        fields_map = {tk["ticker"]: tk.get("bloomberg_field","PX_LAST") for tk in tickers}
         all_ev_ts = [pd.Timestamp(ev["date"]) for ev in valid_events]
         buf_map = {
             "daily":   (timedelta(days=lookback+10),      timedelta(days=lookforward+10)),
@@ -1250,19 +1956,155 @@ def main():
         ne = (max(all_ev_ts) + bf).date()
         actual_s = min(bbg_start, ns)
         actual_e = max(bbg_end, ne)
-        with st.spinner("🔄 Descargando de Bloomberg..."):
-            data_df, err = load_from_bloomberg(fields_map, actual_s, actual_e)
-        if err:
-            st.error(f"❌ {err}")
-            return
-        if data_df is None or data_df.empty:
-            st.error("❌ Bloomberg no devolvio datos.")
-            return
-        st.success(f"✅ Bloomberg: {len(data_df.columns)} series · {len(data_df):,} obs")
 
-    elif data_df is None:
-        st.error("❌ Sube un archivo CSV o Excel primero.")
-        return
+        if preset_run:
+            # ── Modo preset: usar cache maestro (descarga UNA vez todos los tickers) ──
+            force_refresh = st.session_state.get("_bbg_force_refresh", False)
+            if force_refresh:
+                st.session_state._bbg_force_refresh = False
+
+            with st.spinner("🔄 Cargando datos Bloomberg (cache maestro)..."):
+                master_df, err = load_master_cache(actual_s, actual_e, force_refresh=force_refresh)
+
+            if err:
+                st.error(f"❌ {err}")
+                return
+            if master_df is None or master_df.empty:
+                st.error("❌ Bloomberg no devolvio datos.")
+                return
+
+            # Filtrar solo las columnas del preset actual
+            needed_tickers = [tk["ticker"] for tk in tickers]
+            available = [t for t in needed_tickers if t in master_df.columns]
+            missing_in_cache = [t for t in needed_tickers if t not in master_df.columns]
+
+            if missing_in_cache:
+                for mt in missing_in_cache:
+                    st.warning(f"⚠️ Sin datos para **{mt}** en cache.")
+
+            data_df = master_df[available] if available else pd.DataFrame()
+
+            cache_file = _cache_path_for_date(date.today())
+            cache_age = ""
+            if cache_file.exists():
+                import time as _time
+                mod_ts = os.path.getmtime(cache_file)
+                mod_dt = pd.Timestamp.fromtimestamp(mod_ts)
+                cache_age = f" · cache {mod_dt.strftime('%H:%M')}"
+
+            st.success(
+                f"✅ Bloomberg: {len(data_df.columns)} series · "
+                f"{len(data_df):,} obs (de {len(master_df.columns)} en cache{cache_age})"
+            )
+
+            # ── Auto-save local: sobrescribir el Excel default del repo ──
+            # Solo cuando blpapi esta disponible (= corriendo en la maquina del usuario,
+            # no en Streamlit Cloud que tiene filesystem read-only).
+            if BLOOMBERG_AVAILABLE:
+                _names = _get_all_preset_names()
+                _ok, _info = save_data_to_default_excel(
+                    master_df,
+                    target_path=DEFAULT_DATA_PATH,
+                    rename_map={t: _names.get(t, t) for t in master_df.columns},
+                )
+                if _ok:
+                    st.caption(f"💾 Copia guardada en `data/{DEFAULT_DATA_FILENAME}`")
+                else:
+                    st.caption(f"⚠️ No se pudo guardar copia local: {_info}")
+
+            # Boton para forzar re-descarga
+            if st.button("🔄 Actualizar datos Bloomberg", help="Re-descarga todos los tickers desde Bloomberg"):
+                st.session_state._bbg_force_refresh = True
+                st.rerun()
+
+            # ── Descarga Excel con TODOS los tickers del cache ──
+            all_names = _get_all_preset_names()
+            rename_map = {t: all_names.get(t, t) for t in master_df.columns if t in all_names}
+            excel_df = master_df.rename(columns=rename_map)
+            excel_df.index.name = "Date"
+
+            xlsx_buf = BytesIO()
+            with pd.ExcelWriter(xlsx_buf, engine="openpyxl") as writer:
+                excel_df.to_excel(writer, sheet_name="Bloomberg Data")
+            xlsx_buf.seek(0)
+            today_str = date.today().strftime("%Y%m%d")
+            st.download_button(
+                f"📥 Descargar Excel completo ({len(excel_df.columns)} tickers)",
+                xlsx_buf.getvalue(),
+                f"bloomberg_all_tickers_{today_str}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+
+        else:
+            # ── Modo manual: descargar solo los tickers configurados ──
+            fields_map = {tk["ticker"]: tk.get("bloomberg_field","PX_LAST") for tk in tickers}
+            with st.spinner("🔄 Descargando de Bloomberg..."):
+                data_df, err = load_from_bloomberg(fields_map, actual_s, actual_e)
+            if err:
+                st.error(f"❌ {err}")
+                return
+            if data_df is None or data_df.empty:
+                st.error("❌ Bloomberg no devolvio datos.")
+                return
+            st.success(f"✅ Bloomberg: {len(data_df.columns)} series · {len(data_df):,} obs")
+
+            # ── Auto-save local: agregar/actualizar estos tickers en el Excel default ──
+            # Si ya existe el archivo, hacemos merge para no perder otros tickers.
+            if BLOOMBERG_AVAILABLE:
+                merged_df = data_df.copy()
+                if DEFAULT_DATA_PATH.exists():
+                    try:
+                        prev_df, _ = load_default_data_file(DEFAULT_DATA_PATH)
+                        if prev_df is not None and not prev_df.empty:
+                            new_cols = [c for c in prev_df.columns if c not in merged_df.columns]
+                            if new_cols:
+                                merged_df = pd.concat([merged_df, prev_df[new_cols]], axis=1)
+                    except Exception:
+                        pass
+                _names = _get_all_preset_names()
+                _ok, _info = save_data_to_default_excel(
+                    merged_df,
+                    target_path=DEFAULT_DATA_PATH,
+                    rename_map={t: _names.get(t, t) for t in merged_df.columns},
+                )
+                if _ok:
+                    st.caption(f"💾 Copia guardada en `data/{DEFAULT_DATA_FILENAME}`")
+
+    else:
+        # ── Modo CSV/Excel ──
+        if data_df is None:
+            st.error("❌ Activa **Usar archivo default del repo** o sube un archivo CSV/Excel primero.")
+            return
+
+        if preset_run:
+            # Filtrar el data_df a las columnas que existen del preset.
+            needed = [tk["ticker"] for tk in tickers]
+            avail = [t for t in needed if t in data_df.columns]
+            missing = [t for t in needed if t not in data_df.columns]
+
+            if not avail:
+                st.error(
+                    f"❌ Ninguno de los {len(needed)} tickers de **{preset_run_key}** "
+                    f"está en tu archivo. Verifica los headers o cambia de fuente."
+                )
+                return
+            if missing:
+                _show_missing = ', '.join(missing[:8])
+                if len(missing) > 8:
+                    _show_missing += f" ...y {len(missing)-8} más"
+                st.warning(
+                    f"⚠️ {len(missing)} de {len(needed)} tickers sin datos en tu archivo: "
+                    f"{_show_missing}"
+                )
+
+            # Filtrar tickers a los disponibles para que el pipeline no falle
+            tickers = [t for t in tickers if t["ticker"] in avail]
+            data_df = data_df[avail]
+            st.success(
+                f"✅ {preset_run_key}: {len(data_df.columns)} series · {len(data_df):,} obs "
+                f"(de archivo cargado)"
+            )
 
     # ══════════════════════════════════════════════════════════════════════════
     # PROCESAMIENTO
@@ -1308,7 +2150,9 @@ def main():
                     series, ev["date"], lookback, lookforward, frequency,
                     agg_method=agg_method,
                 )
-                if pd.isna(raw.get(0, np.nan)):
+                # Solo omitir si NO hay ningun dato en toda la ventana
+                has_any = any(not pd.isna(v) for v in raw.values())
+                if not has_any:
                     skipped.append(ev_label)
                     continue
                 aligned_data[ev_label] = apply_transformation(raw, field_mode, baseline_mode)
@@ -1327,7 +2171,7 @@ def main():
             aligned_data, field_mode, baseline_mode, frequency,
             show_avg=show_avg, highlight_event=highlight_event,
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, key=f"chart_{tk_idx}")
 
         # ── Botones de export ─────────────────────────────────────────────────
         exp_c1, exp_c2, exp_c3 = st.columns(3)
@@ -1383,5 +2227,6 @@ def main():
     st.success("✅ Analisis completado.")
 
 
+# Punto de entrada
 if __name__ == "__main__":
     main()
